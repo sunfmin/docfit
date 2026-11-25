@@ -1,0 +1,10 @@
+{
+  "tree": "df3dfa6a8c94a290a18a3d627394fdff9df9f05b+d1fba762150c532c",
+  "lines": 102,
+  "serves": "docfit#20",
+  "considered": "reusing tasks::debt for the counted kinds (it knows only budgets and rehome; the counts' slots live in refs, restates and measurements, so each decides its own debt there); serializing Ref and Restated with serde instead of mapping fields by hand (done); a Task enum (deleted)",
+  "reviewer": "codex:01a21383-3305-7213-a2c4-cf574b225f61:default",
+  "author": "claude-code:14b3ec34-e594-590e-86df-bf9e75c87446:opus",
+  "cut": "In src/tasks.rs, delete the Task enum and its two lookup methods and return the rehome and over-budget debt lists directly. In src/cli.rs, put each kind name, help topic, acceptance suffix, and debt list in the existing ordered array, and use the shared output loop to format acceptance and add `where` for the first two kinds.",
+  "answer": "Done: Task enum and its methods deleted, tasks::debt returns the two lists, cli's ordered array holds each kind's name, topic, accept suffix and debt, one loop formats accept and adds where for the rehome-steps kinds. The rest is the three help topics (the steps, help as the only manual) and one debt fn per counted kind."
+}
