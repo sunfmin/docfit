@@ -4,6 +4,7 @@
 mod budget;
 mod cli;
 mod documents;
+mod hot;
 mod kind;
 mod measurements;
 mod paragraph;

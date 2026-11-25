@@ -3,6 +3,7 @@
 //! config's text arrive as arguments.
 
 use crate::budget::Size;
+use crate::hot::{self, Hot};
 use crate::kind::Kind;
 use crate::refs;
 use globset::{GlobBuilder, GlobMatcher};
@@ -50,12 +51,14 @@ pub(crate) struct Entry {
 
 /// `docfit.toml`, read: its entries, the globs of its string catalogs, the
 /// globs of what it ignores, [`IGNORED`] among them, and the names whose
-/// `<name>#<digits>` cites the local tracker (`None`: the check is off).
+/// `<name>#<digits>` cites the local tracker (`None`: the check is off), and
+/// when a document is hot.
 pub(crate) struct Config {
     pub(crate) entries: Vec<Entry>,
     pub(crate) catalogs: Vec<GlobMatcher>,
     ignore: Vec<GlobMatcher>,
     pub(crate) local_refs: Option<Vec<String>>,
+    pub(crate) hot: Hot,
 }
 
 impl Config {
@@ -162,6 +165,10 @@ pub(crate) fn config(config: &str) -> Result<Config, Vec<Refusal>> {
         }
         names
     });
+    let hot = hot::read(table.get(hot::KEY)).unwrap_or_else(|r| {
+        refusals.push(r);
+        Hot::default()
+    });
     for (glob, value) in documents {
         let (kind, bytes, paragraph) = match value.clone().try_into() {
             Ok(Entered::Kind(name)) => (name, None, None),
@@ -201,6 +208,7 @@ pub(crate) fn config(config: &str) -> Result<Config, Vec<Refusal>> {
             catalogs,
             ignore,
             local_refs,
+            hot,
         })
     } else {
         Err(refusals)

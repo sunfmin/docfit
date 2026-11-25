@@ -5,7 +5,8 @@ mod common;
 
 use common::{docfit, isolated, repo};
 use serde_json::{Value, json};
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 const CODE: &str = "fn main() {\n    let answer = check(repo);\n    print(answer);\n}\n";
 
@@ -40,7 +41,7 @@ fn a_baseline_with_debt_answers_one_task_of_each_kind() {
     assert_eq!(answer["by"], format!("docfit {}", env!("DOCFIT_VERSION")));
     assert_eq!(
         answer["counts"],
-        json!({ "rehome": 1, "over-budget": 1, "local-refs": 1, "restates": 1, "measurement": 1 })
+        json!({ "rehome": 1, "over-budget": 1, "local-refs": 1, "restates": 1, "measurement": 1, "hot-file": 0 })
     );
     let tasks = answer["tasks"].as_array().unwrap();
     assert_eq!(tasks.len(), 5, "{answer}");
@@ -126,8 +127,7 @@ fn the_steps_are_the_text_help_rehome_prints_and_put_the_map_in_the_commit() {
 
 #[test]
 fn a_task_paid_and_ratcheted_is_gone() {
-    let none =
-        json!({ "rehome": 0, "over-budget": 0, "local-refs": 0, "restates": 0, "measurement": 0 });
+    let none = json!({ "rehome": 0, "over-budget": 0, "local-refs": 0, "restates": 0, "measurement": 0, "hot-file": 0 });
     let dir = indebted();
     std::fs::remove_file(dir.path().join("SPEC.md")).unwrap();
     std::fs::write(dir.path().join("README.md"), "# Readme\n").unwrap();
@@ -184,4 +184,124 @@ fn a_repo_with_no_debt_answers_no_task() {
     assert_eq!(answer["notes"], json!([]));
     let (_, first) = docfit(dir.path(), &["next"]);
     assert_eq!(first["task"], json!(null));
+}
+
+/// A repo of 100 first-parent commits, newest last: `HOT.md` changed in 30
+/// of them, `WARM.md` in 20, and `docfit.toml` written as `config`.
+fn changed(config: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    common::git(dir.path(), &["init", "-q"]);
+    let mut stream = String::new();
+    for i in 0..100 {
+        let msg = format!("change {i}");
+        stream += &format!(
+            "commit refs/heads/work\ncommitter A <a@b> {} +0000\ndata {}\n{msg}\n",
+            1_700_000_000 + i,
+            msg.len()
+        );
+        let mut files = vec![("src/n.txt", format!("{i}\n"))];
+        if i == 0 {
+            files.push(("docfit.toml", config.to_string()));
+        }
+        if i % 10 < 3 {
+            files.push(("HOT.md", format!("# Hot\n\nChange {i}.\n")));
+        }
+        if i % 5 == 0 {
+            files.push(("WARM.md", format!("# Warm\n\nChange {i}.\n")));
+        }
+        for (path, text) in files {
+            stream += &format!("M 644 inline {path}\ndata {}\n{text}\n", text.len());
+        }
+    }
+    let mut import = isolated(Command::new("git"), dir.path())
+        .args(["fast-import", "--quiet"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    import
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stream.as_bytes())
+        .unwrap();
+    assert!(import.wait().unwrap().success());
+    common::git(dir.path(), &["checkout", "-q", "-f", "work"]);
+    dir
+}
+
+const REGISTERED: &str =
+    "[documents]\n\"HOT.md\" = \"design-note\"\n\"WARM.md\" = \"design-note\"\n";
+
+/// The files of each `hot-file` task `docfit next --all` answers in `dir`.
+fn hot(dir: &std::path::Path) -> Vec<Value> {
+    let (code, answer) = docfit(dir, &["next", "--all"]);
+    assert_eq!(code, 0, "{answer}");
+    let tasks = answer["tasks"].as_array().unwrap();
+    let hot: Vec<Value> = tasks
+        .iter()
+        .filter(|t| t["kind"] == "hot-file")
+        .cloned()
+        .collect();
+    assert_eq!(answer["counts"]["hot-file"], hot.len(), "{answer}");
+    hot
+}
+
+#[test]
+fn a_document_changed_in_more_than_a_quarter_of_the_last_100_commits_is_a_hot_file_task() {
+    let dir = changed(REGISTERED);
+    let hot = hot(dir.path());
+    assert_eq!(hot.len(), 1, "{hot:?}");
+    let task = &hot[0];
+    assert_eq!(task["files"], json!(["HOT.md"]));
+    let evidence = &task["evidence"];
+    assert_eq!(
+        (
+            &evidence["share"],
+            &evidence["changed"],
+            &evidence["window"]
+        ),
+        (&json!(0.3), &json!(30), &json!(100))
+    );
+    let subjects: Vec<&str> = evidence["commits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["subject"].as_str().unwrap())
+        .collect();
+    let newest = [92, 91, 90, 82, 81, 80, 72, 71, 70, 62].map(|i| format!("change {i}"));
+    assert_eq!(subjects, newest);
+    let steps = task["steps"].as_str().unwrap();
+    assert!(help(dir.path(), "hot-file").contains(steps), "{steps}");
+    let accept = task["accept"].as_str().unwrap();
+    assert!(
+        accept.contains("`HOT.md` is within its kind's budget"),
+        "{accept}"
+    );
+    // A signal, not a fault: the check is green on it.
+    assert_eq!(docfit(dir.path(), &["check"]).0, 0);
+}
+
+#[test]
+fn hot_in_docfit_toml_moves_the_line() {
+    let lower = changed(&format!("hot = {{ share = 0.15 }}\n{REGISTERED}"));
+    let files: Vec<Value> = hot(lower.path())
+        .iter()
+        .map(|t| t["files"][0].clone())
+        .collect();
+    assert_eq!(files, ["HOT.md", "WARM.md"]);
+    // 3 of the last 10 change HOT.md, 2 WARM.md: neither past half.
+    let window = changed(&format!(
+        "hot = {{ window = 10, share = 0.5 }}\n{REGISTERED}"
+    ));
+    assert_eq!(hot(window.path()), Vec::<Value>::new());
+    let bad = changed(&format!("hot = {{ share = 2 }}\n{REGISTERED}"));
+    let (code, answer) = docfit(bad.path(), &["next", "--all"]);
+    assert_eq!(code, 2);
+    assert!(
+        answer["error"][0]["fix"]
+            .as_str()
+            .unwrap()
+            .contains("share = 0.25"),
+        "{answer}"
+    );
 }

@@ -1,0 +1,10 @@
+{
+  "tree": "df5eb0e6855147df87e8a89ad223da1cc1330fd0+d1fba762150c532c",
+  "lines": 155,
+  "serves": "docfit#21",
+  "considered": "reusing tasks::debt's Debt and next's kind array rather than a new task type; reusing repo::git for the history; common::git commits for the fixture instead of fast-import",
+  "reviewer": "codex:01a2138b-c08d-7342-8509-1df9bcfb24f1:default",
+  "author": "claude-code:68c66e5c-9e43-5827-a010-a33d8a026e80:opus",
+  "cut": "In tests/next.rs, reuse common::git with commit --allow-empty to build the same 100-commit fixture, deleting the fast-import encoder, piped subprocess, and dummy source file. In src/repo.rs, split each NUL-delimited record once into its header and file lines, then split the header into hash and subject, removing the fallback for a header Git’s format always supplies.",
+  "answer": "repo.rs: done, each record split once into header and files. tests/next.rs: not taken; tried it, the next suite went from 0.52 s to 7.04 s (cargo test --test next), since its 3 fixtures then run 200 git processes each; fast-import builds each in one"
+}
