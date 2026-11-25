@@ -49,7 +49,7 @@ mod tests {
     }
 
     #[test]
-    fn version_says_the_stamped_version() {
+    fn version_names_the_crate_version() {
         assert_eq!(
             answer(&["--version".into()]).1,
             format!("docfit {}\n", env!("DOCFIT_VERSION"))
