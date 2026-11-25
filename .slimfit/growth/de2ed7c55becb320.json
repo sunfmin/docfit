@@ -1,0 +1,10 @@
+{
+  "tree": "ff180e4397a781e8eee3bf7dfee0cbe225f0f28a+d1fba762150c532c",
+  "lines": 130,
+  "serves": "docfit#7",
+  "considered": "documents::check and budget::check for a home (each decides another rule; pointers is its own pure module), Kind::candidates' adr directory test (a different fact), a regex or Markdown parser crate (rejected: a new dependency for line scanning)",
+  "reviewer": "codex:01a21300-ae2a-7200-838a-ecf9f35486e0:default",
+  "author": "claude-code:0e5ee7e2-10f5-5931-9376-53f7c02264ec:opus",
+  "cut": "In src/pointers.rs, return filtered iterators from links and adrs instead of building temporary vectors, use strip_prefix to consume the ADR separator and reject other forms in one step, and simplify resolve by walking the directory and target components in one loop with an empty directory for repo-rooted targets.",
+  "answer": "Made all three: links and adrs return filtered iterators, the ADR separator is taken with strip_prefix, resolve walks dir and path in one chained loop; 151 net lines down to 130"
+}
