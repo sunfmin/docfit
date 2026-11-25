@@ -1,0 +1,10 @@
+{
+  "tree": "754f763390062efba3136f008ffd2d67e9f2ef09+d1fba762150c532c",
+  "lines": 63,
+  "serves": "docfit#19",
+  "considered": "where's evidence detector (paragraph::measures), reused rather than a second one; restates' per-measure shrink-only count, now shared through budget::ratchet_counts/adopt_counts; refs' count kept as is (it also holds files to rehome, a different hold)",
+  "reviewer": "codex:01a21378-f412-7c83-8509-f4538185bf13:default",
+  "author": "claude-code:f113844f-be22-5b57-aa37-07f655e26167:opus",
+  "cut": "Extract the per-field baseline lookup, shrink-only update, and first-time adoption shared by src/restates.rs and src/measurements.rs into src/budget.rs, and reuse them for strings, copies, and measurements while keeping each fault’s payload. In src/cli.rs, fold Counted::faults and Counted::ratchet into their sole callers, faults and ratcheted. I could inspect the supplied diff only because workspace access was unavailable.",
+  "answer": "Both made: budget::held/ratchet_counts/adopt_counts hold a document's count by its Slot, used by restates (strings, copies) and measurements; Counted::faults and Counted::ratchet folded into faults and ratcheted. Net growth fell from 74 to 63 lines; the rest is the new fault, its help constants and the Counted bundle replacing a tuple."
+}
