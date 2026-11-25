@@ -1,0 +1,10 @@
+{
+  "tree": "37a4176429f10d359f1e2684e58a991ac8706fab+d1fba762150c532c",
+  "lines": 213,
+  "serves": "docfit#9",
+  "considered": "documents::check's unregistered fault, reused as each stray's fault and as init's rehome kinds and fix; budget::ratchet, reused unchanged as init's adoption; cli::write, made general to write docfit.toml too; toml_edit, not added: inserting lines after the [documents] header keeps the config's comments with no new dependency",
+  "reviewer": "codex:01a21304-4e89-76d0-9af8-b83e4a7c8aaf:default",
+  "author": "claude-code:921479c6-73cf-5f68-85db-7bc77c14e444:opus",
+  "cut": "In src/cli.rs, extend the existing faults helper to merge budget faults and sort by path for both check and init. In init, use whether this run created the baseline to populate rehome directly from strays, dropping the per-file baseline lookup and the Held import. Reuse that same branch to write the new baseline or move the existing one into the response, dropping the clone and equality check.",
+  "answer": "Made all three: faults(answer, docs, strays, baseline) merges and sorts for check and init; init matches on baseline() once, writing and adopting only in the None arm, and fills rehome from strays when it adopted; the Held import, clone and equality check are gone. Net growth moved 212 -> 213: rustfmt spreads the shared helper's signature over several lines, and the duplicated logic is gone."
+}

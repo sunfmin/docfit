@@ -1,0 +1,6 @@
+{
+  "tree": "de57f38c474bd3ab877fd73607ba07341079ec32+d1fba762150c532c",
+  "picker": "codex:01a2130e-69e5-7573-ad13-18af7a9d737e:default",
+  "author": "claude-code:15d522e0-7e9d-5357-a9cf-7df81a34b3a9:opus",
+  "none": "The assertions already distinguish unknown roots, missing files with recognized extensions, and missing extensionless paths rooted at the repo, the document directory, or through `..`, exposing each listed decision mutation."
+}

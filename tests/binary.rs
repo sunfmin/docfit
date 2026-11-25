@@ -41,6 +41,8 @@ fn help_is_the_manual() {
         "{out}"
     );
     assert!(out.contains("## Budgets"), "{out}");
+    let (_, check) = docfit(&["check", "--help"]);
+    assert!(check.contains("one of `.md`, `.toml`, `.json`,"), "{check}");
 }
 
 #[test]

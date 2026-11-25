@@ -1,0 +1,27 @@
+{
+  "tree": "54146ab8efe311828c54b1d57bcf1836cf174e6d+d1fba762150c532c",
+  "picker": "codex:01a21305-c118-7a42-82d2-c88f4d09e3ae:default",
+  "author": "claude-code:921479c6-73cf-5f68-85db-7bc77c14e444:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/cli.rs:433:27: replace || with && in init",
+        "why": "The existing-baseline test verifies the config rewrite but never asserts that this config-only write sets changed to true.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/cli.rs:436:17: replace match guard changed with true in init",
+        "why": "The repeat-init test checks changed is false but never checks that next reports there is nothing to adopt.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/cli.rs:436:17: replace match guard changed with false in init",
+        "why": "The successful first-init tests check the writes but never check that next tells the user to commit the config and baseline.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}

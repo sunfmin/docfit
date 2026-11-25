@@ -1,4 +1,4 @@
-//! `docfit check` on throwaway git repos: its JSON and exit code.
+//! `docfit check`, `ratchet` and `fmt` on throwaway git repos: their JSON and exit code.
 
 use serde_json::Value;
 use std::path::Path;
@@ -6,14 +6,10 @@ use std::process::Command;
 
 mod common;
 
-use common::{isolated, repo};
+use common::{docfit, git, isolated, repo};
 
 fn check(dir: &Path) -> (i32, Value) {
-    docfit(dir, "check")
-}
-
-fn docfit(dir: &Path, command: &str) -> (i32, Value) {
-    common::docfit(dir, &[command])
+    docfit(dir, &["check"])
 }
 
 const README_ONLY: &str = "[documents]\n\"README.md\" = \"readme\"\n";
@@ -231,7 +227,7 @@ fn over_its_budget_with_no_baseline_is_red() {
         fix.starts_with("break line 2 of `README.md` at its sentences"),
         "{fix}"
     );
-    assert!(fix.contains("`docfit fmt` (docfit#8)"), "{fix}");
+    assert!(fix.contains("`docfit fmt README.md` breaks it"), "{fix}");
     assert!(
         fix.contains("`docfit ratchet` writes .docfit/baseline.json"),
         "{fix}"
@@ -252,7 +248,7 @@ fn the_kinds_default_budget_holds_where_no_entry_sets_one() {
 #[test]
 fn over_budget_but_within_the_baseline_is_green_and_growth_past_it_red() {
     let dir = repo(&[("docfit.toml", BIG), ("README.md", "ab\nabcdefg\n")]);
-    let (code, answer) = docfit(dir.path(), "ratchet");
+    let (code, answer) = docfit(dir.path(), &["ratchet"]);
     assert_eq!(code, 0, "{answer}");
     assert_eq!(answer["changed"], true);
     let held = serde_json::json!({ "README.md": { "bytes": 11, "line": 7 } });
@@ -294,7 +290,7 @@ fn ratchet_never_raises_a_number() {
         ("README.md", "abcdefghijkl\n"),
         ("A.md", "a\n"),
     ]);
-    docfit(dir.path(), "ratchet");
+    docfit(dir.path(), &["ratchet"]);
     assert_eq!(
         baseline(dir.path()),
         serde_json::json!({ "README.md": { "bytes": 13, "line": 12 } })
@@ -303,7 +299,7 @@ fn ratchet_never_raises_a_number() {
     // Grown, and a new document over its budget: neither raises the baseline.
     std::fs::write(dir.path().join("README.md"), "abcdefghijklmn\n").unwrap();
     std::fs::write(dir.path().join("A.md"), "abcdefghijklmn\n").unwrap();
-    let (code, answer) = docfit(dir.path(), "ratchet");
+    let (code, answer) = docfit(dir.path(), &["ratchet"]);
     assert_eq!((code, &answer["changed"]), (0, &false.into()), "{answer}");
     assert_eq!(
         baseline(dir.path()),
@@ -323,7 +319,7 @@ fn ratchet_never_raises_a_number() {
             .starts_with("run `docfit ratchet`"),
         "{answer}"
     );
-    let (_, answer) = docfit(dir.path(), "ratchet");
+    let (_, answer) = docfit(dir.path(), &["ratchet"]);
     assert_eq!(answer["changed"], true, "{answer}");
     assert_eq!(
         baseline(dir.path()),
@@ -341,10 +337,10 @@ fn ratchet_never_raises_a_number() {
 
     // Within budget whole: the baseline is empty, and stays.
     std::fs::write(dir.path().join("README.md"), "ab\n").unwrap();
-    docfit(dir.path(), "ratchet");
+    docfit(dir.path(), &["ratchet"]);
     assert_eq!(baseline(dir.path()), serde_json::json!({}));
     std::fs::write(dir.path().join("README.md"), "abcdefghijklmn\n").unwrap();
-    docfit(dir.path(), "ratchet");
+    docfit(dir.path(), &["ratchet"]);
     assert_eq!(baseline(dir.path()), serde_json::json!({}));
 }
 
@@ -367,7 +363,7 @@ fn a_baseline_or_document_it_cannot_read_is_refused() {
     )
     .unwrap();
     for command in ["check", "ratchet"] {
-        let (code, answer) = docfit(dir.path(), command);
+        let (code, answer) = docfit(dir.path(), &[command]);
         assert_eq!(code, 2, "{answer}");
         assert!(
             answer["error"][0]["fix"]
@@ -394,7 +390,7 @@ fn a_baseline_it_cannot_read_or_write_is_refused() {
     let held = dir.path().join(".docfit");
     std::fs::create_dir(&held).unwrap();
     std::fs::set_permissions(&held, std::fs::Permissions::from_mode(0o555)).unwrap();
-    let (code, answer) = docfit(dir.path(), "ratchet");
+    let (code, answer) = docfit(dir.path(), &["ratchet"]);
     assert_eq!(code, 2, "{answer}");
     assert!(
         answer["error"][0]["fix"]
@@ -427,12 +423,443 @@ fn at_its_budget_exactly_is_within_it() {
             .contains("(it is 16): "),
         "{answer}"
     );
-    docfit(dir.path(), "ratchet");
+    docfit(dir.path(), &["ratchet"]);
     // Shrunk to its byte budget exactly: that measure leaves the baseline.
     std::fs::write(dir.path().join("README.md"), "abcdefg\nb\n").unwrap();
-    docfit(dir.path(), "ratchet");
+    docfit(dir.path(), &["ratchet"]);
     assert_eq!(
         baseline(dir.path()),
         serde_json::json!({ "README.md": { "line": 7 } })
     );
+}
+
+const POINTED: &str = "[documents]\n\"README.md\" = \"readme\"\n\"docs/**/*.md\" = \"agent\"\n";
+
+/// The `broken_pointer` faults of `readme` (and `docs/agents/a.md`, `guide`),
+/// each as (file, line, "<pointer> -> <missing>").
+fn broken(readme: &str, guide: &str) -> Vec<(String, u64, String)> {
+    let dir = repo(&[
+        ("docfit.toml", POINTED),
+        ("README.md", readme),
+        ("docs/agents/a.md", guide),
+        ("docs/adr/0001-one.md", "x\n"),
+        ("src/main.rs", "fn main() {}\n"),
+    ]);
+    let (code, answer) = check(dir.path());
+    let faults: Vec<_> = answer["faults"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["fault"] == "broken_pointer")
+        .map(|f| {
+            let fix = f["fix"].as_str().unwrap();
+            assert!(fix.contains(f["missing"].as_str().unwrap()), "{fix}");
+            (
+                f["file"].as_str().unwrap().to_string(),
+                f["line"].as_u64().unwrap(),
+                format!(
+                    "{} -> {}",
+                    f["pointer"].as_str().unwrap(),
+                    f["missing"].as_str().unwrap()
+                ),
+            )
+        })
+        .collect();
+    assert_eq!(code, if faults.is_empty() { 0 } else { 1 }, "{answer}");
+    faults
+}
+
+fn at(file: &str, line: u64, missing: &str) -> (String, u64, String) {
+    (file.to_string(), line, missing.to_string())
+}
+
+#[test]
+fn a_backticked_path_that_exists_is_green_and_one_that_does_not_red() {
+    let readme = "Run `src/main.rs:1`, see `docs/agents/`, `docfit.toml` and `docs/adr`.\n\
+        Not paths: `docfit --help`, `*.md`, `<dir>/x`, `~/a/b`, `/usr/bin`, `.md`, `Kind::ALL`, `a.b`, `nowhere.md:x`.\n\
+        Gone: `src/gone.rs` and `notes.toml`.\n";
+    assert_eq!(
+        broken(
+            readme,
+            "Here `a.md`, from the top `README.md`; not `b.md`.\n"
+        ),
+        [
+            at("README.md", 3, "src/gone.rs -> src/gone.rs"),
+            at("README.md", 3, "notes.toml -> notes.toml"),
+            at("docs/agents/a.md", 1, "b.md -> b.md"),
+        ]
+    );
+}
+
+#[test]
+fn a_backticked_name_with_a_slash_points_only_into_what_git_tracks_at_its_first_segment() {
+    let readme = "Names: `google/siglip2-base-patch16-224`, `origin/proving`, `foo/bar`, `models/`.\n\
+        Gone: `src/missing.rs`, `docs/adr/0099-x.md`, `src/gone`, `foo/bar.rs`.\n";
+    assert_eq!(
+        broken(
+            readme,
+            "Here `adr/`, `agents/x`, `a.md/x`, `../adr/0002`; not `origin/main`.\n"
+        ),
+        [
+            at("README.md", 2, "src/missing.rs -> src/missing.rs"),
+            at("README.md", 2, "docs/adr/0099-x.md -> docs/adr/0099-x.md"),
+            at("README.md", 2, "src/gone -> src/gone"),
+            at("README.md", 2, "foo/bar.rs -> foo/bar.rs"),
+            at("docs/agents/a.md", 1, "a.md/x -> a.md/x"),
+            at("docs/agents/a.md", 1, "../adr/0002 -> ../adr/0002"),
+        ]
+    );
+}
+
+#[test]
+fn a_link_to_a_missing_file_is_red_and_a_url_is_not_checked() {
+    let readme = "[a](docs/agents/a.md#top), [`src`](src/), [t](</src/main.rs> \"title\")\n\
+        [web](https://example.com/x.md), [mail](mailto:a@b.c), [anchor](#here)\n\
+        ```\n[in a fence](nowhere.md) `nowhere.md`\n```\n\
+        [gone](docs/gone.md)\n";
+    let guide =
+        "[up](../../README.md), [adr](../adr/0001-one.md), [out](../../../x.md), [no](c.md)\n";
+    assert_eq!(
+        broken(readme, guide),
+        [
+            at("README.md", 6, "docs/gone.md -> docs/gone.md"),
+            at("docs/agents/a.md", 1, "../../../x.md -> ../../../x.md"),
+            at("docs/agents/a.md", 1, "c.md -> docs/agents/c.md"),
+        ]
+    );
+}
+
+#[test]
+fn an_adr_named_by_a_number_with_no_file_of_it_is_red() {
+    let readme =
+        "Per ADR 0001 and ADR-1, ADRs, `ADR 0002`, BADR 0003, ADR 0004x, ADR-.\nBut ADR 0009.\n";
+    assert_eq!(
+        broken(readme, "Or ADR-0010.\n"),
+        [
+            at("README.md", 2, "ADR 0009 -> docs/adr/0009-*"),
+            at("docs/agents/a.md", 1, "ADR-0010 -> docs/adr/0010-*"),
+        ]
+    );
+}
+
+const PROSE: &str = "# Title. Still the title.\n\nOne. Two? Three!\n- 第一句。第二句。\n\n```sh\necho a. b.\n```\n\n| a. b. | c. d. |\n|---|---|\n";
+
+#[test]
+fn an_unformatted_document_is_red_until_fmt_breaks_it_at_its_sentences() {
+    let dir = repo(&[("docfit.toml", README_ONLY), ("README.md", PROSE)]);
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 1, "{answer}");
+    assert_eq!(
+        answer["faults"],
+        serde_json::json!([{
+            "file": "README.md", "fault": "unformatted", "line": 3,
+            "fix": "run `docfit fmt README.md`: it breaks its prose at its sentences, one per line",
+        }])
+    );
+    let (code, answer) = docfit(dir.path(), &["fmt", "README.md"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["changed"], true);
+    assert_eq!(answer["formatted"], serde_json::json!(["README.md"]));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("README.md")).unwrap(),
+        "# Title. Still the title.\n\nOne.\nTwo?\nThree!\n- 第一句。\n  第二句。\n\n```sh\necho a. b.\n```\n\n| a. b. | c. d. |\n|---|---|\n"
+    );
+    assert!(!dir.path().join("README.md.tmp").exists());
+    let (code, answer) = check(dir.path());
+    assert_eq!(
+        (code, &answer["faults"]),
+        (0, &serde_json::json!([])),
+        "{answer}"
+    );
+}
+
+#[test]
+fn a_second_fmt_changes_nothing() {
+    let dir = repo(&[("docfit.toml", README_ONLY), ("README.md", PROSE)]);
+    docfit(dir.path(), &["fmt"]);
+    let once = std::fs::read_to_string(dir.path().join("README.md")).unwrap();
+    let (code, answer) = docfit(dir.path(), &["fmt"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["changed"], false);
+    assert_eq!(answer["formatted"], serde_json::json!([]));
+    assert_eq!(answer["next"], "nothing to format: run `docfit check`");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("README.md")).unwrap(),
+        once
+    );
+}
+
+#[test]
+fn fmt_leaves_a_file_that_is_no_registered_document_alone() {
+    let dir = repo(&[
+        ("docfit.toml", README_ONLY),
+        ("README.md", "A. B.\n"),
+        ("notes.md", "C. D.\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), &["fmt"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["formatted"], serde_json::json!(["README.md"]));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("notes.md")).unwrap(),
+        "C. D.\n"
+    );
+}
+
+#[test]
+fn fmt_naming_a_file_that_is_no_registered_document_is_refused_and_writes_nothing() {
+    let dir = repo(&[
+        ("docfit.toml", README_ONLY),
+        ("README.md", "A. B.\n"),
+        ("notes.md", "C. D.\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), &["fmt", "README.md", "notes.md"]);
+    assert_eq!(code, 2, "{answer}");
+    assert_eq!(
+        answer["error"],
+        serde_json::json!([{
+            "fault": "`notes.md` is not a registered document",
+            "fix": "name it from the repo's top as `docfit check` lists it under `documents`, or register it in docfit.toml",
+        }])
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("README.md")).unwrap(),
+        "A. B.\n"
+    );
+}
+
+#[test]
+fn fmt_on_a_document_it_cannot_write_is_refused() {
+    let dir = repo(&[("docfit.toml", README_ONLY), ("README.md", "A. B.\n")]);
+    std::fs::create_dir(dir.path().join("README.md.tmp")).unwrap();
+    let (code, answer) = docfit(dir.path(), &["fmt"]);
+    assert_eq!(code, 2, "{answer}");
+    let fix = answer["error"][0]["fix"].as_str().unwrap();
+    assert!(
+        fix.ends_with("README.md writable, then run it again"),
+        "{fix}"
+    );
+}
+
+#[test]
+fn init_registers_each_file_by_its_place_and_holds_the_rest_to_rehome_green_that_day() {
+    let big = "x\n".repeat(2500);
+    let dir = repo(&[
+        ("README.md", &big),
+        ("CLAUDE.md", "c\n"),
+        ("AGENTS.md", "a\n"),
+        ("docs/agents/tracker.md", "t\n"),
+        ("docs/adr/0001-one.md", "d\n"),
+        ("GLOSSARY.md", "g\n"),
+        ("SPEC.md", "spec\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(
+        answer["registered"],
+        serde_json::json!({
+            "AGENTS.md": "agent", "CLAUDE.md": "agent", "GLOSSARY.md": "glossary",
+            "README.md": "readme", "docs/adr/0001-one.md": "adr", "docs/agents/tracker.md": "agent"
+        })
+    );
+    let rehome = answer["rehome"].as_array().unwrap();
+    assert_eq!(rehome.len(), 1, "{answer}");
+    assert_eq!(rehome[0]["file"], "SPEC.md");
+    assert_eq!(rehome[0]["size"], 5);
+    assert_eq!(
+        rehome[0]["kinds"],
+        serde_json::json!(["readme", "agent", "adr", "glossary", "design-note"])
+    );
+    assert_eq!(answer["faults"], serde_json::json!([]), "{answer}");
+    assert_eq!(answer["changed"], true);
+    assert_eq!(
+        answer["next"],
+        "commit docfit.toml and .docfit/baseline.json, then `docfit check`; register a file in `rehome` under a kind where one fits it"
+    );
+    assert_eq!(
+        baseline(dir.path()),
+        serde_json::json!({ "README.md": { "bytes": 5000 }, "SPEC.md": { "rehome": 5 } })
+    );
+    assert_eq!(answer["baseline"], baseline(dir.path()));
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 0, "{checked}");
+    assert_eq!(checked["faults"], serde_json::json!([]), "{checked}");
+
+    let toml = std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap();
+    let (code, again) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 0, "{again}");
+    assert_eq!(again["registered"], serde_json::json!({}), "{again}");
+    assert_eq!(again["rehome"], serde_json::json!([]), "{again}");
+    assert_eq!(again["changed"], false, "{again}");
+    assert_eq!(again["next"], "nothing to adopt: run `docfit check`");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap(),
+        toml
+    );
+
+    std::fs::write(dir.path().join("SPEC.md"), "spec!\n").unwrap();
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 1, "{checked}");
+    assert_eq!(checked["faults"][0]["file"], "SPEC.md");
+    assert_eq!(checked["faults"][0]["fault"], "rehome_grew");
+    assert_eq!(checked["faults"][0]["size"], 6);
+    assert_eq!(checked["faults"][0]["limit"], 5);
+    assert_eq!(
+        checked["faults"][0]["fix"],
+        "cut `SPEC.md` back to at most 5 bytes (it is 6), the size .docfit/baseline.json holds it at to rehome: move its content to the documents whose kinds it holds, or register it under a kind"
+    );
+
+    std::fs::write(dir.path().join("notes.md"), "n\n").unwrap();
+    std::fs::write(dir.path().join("SPEC.md"), "sp\n").unwrap();
+    git(dir.path(), &["add", "-A"]);
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 1, "{checked}");
+    assert_eq!(checked["faults"].as_array().unwrap().len(), 1, "{checked}");
+    assert_eq!(checked["faults"][0]["fault"], "unregistered");
+    assert_eq!(checked["faults"][0]["file"], "notes.md");
+    docfit(dir.path(), &["ratchet"]);
+    assert_eq!(
+        baseline(dir.path())["SPEC.md"],
+        serde_json::json!({ "rehome": 3 })
+    );
+    assert_eq!(baseline(dir.path()).get("notes.md"), None);
+
+    git(dir.path(), &["rm", "-qf", "SPEC.md", "notes.md"]);
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 0, "{checked}");
+    assert!(
+        checked["next"]
+            .as_str()
+            .unwrap()
+            .starts_with("run `docfit ratchet`"),
+        "{checked}"
+    );
+    let (_, ratcheted) = docfit(dir.path(), &["ratchet"]);
+    assert_eq!(ratcheted["changed"], true);
+    assert_eq!(
+        baseline(dir.path()),
+        serde_json::json!({ "README.md": { "bytes": 5000 } })
+    );
+}
+
+#[test]
+fn init_keeps_what_is_registered_and_adds_only_what_is_not() {
+    let toml = "# ours\n[documents]\n\"README.md\" = { kind = \"readme\", bytes = 100 }\n\n[other]\nx = 1\n";
+    let big = "y\n".repeat(1500);
+    let dir = repo(&[
+        ("docfit.toml", toml),
+        ("README.md", "r\n"),
+        ("CLAUDE.md", &big),
+    ]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(
+        answer["registered"],
+        serde_json::json!({ "CLAUDE.md": "agent" })
+    );
+    assert_eq!(answer["rehome"], serde_json::json!([]));
+    assert_eq!(answer["changed"], true);
+    let written = std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap();
+    assert_eq!(
+        written,
+        "# ours\n[documents]\n\"README.md\" = { kind = \"readme\", bytes = 100 }\n\"CLAUDE.md\" = \"agent\"\n\n[other]\nx = 1\n"
+    );
+    assert_eq!(
+        baseline(dir.path()),
+        serde_json::json!({ "CLAUDE.md": { "bytes": 3000 } })
+    );
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 0, "{checked}");
+    assert_eq!(checked["documents"]["CLAUDE.md"], "agent");
+}
+
+#[test]
+fn init_refuses_a_docfit_toml_it_cannot_read_and_writes_nothing() {
+    let dir = repo(&[("docfit.toml", "[documents\n"), ("README.md", "r\n")]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 2, "{answer}");
+    assert!(
+        answer["error"][0]["fault"]
+            .as_str()
+            .unwrap()
+            .contains("not TOML")
+    );
+    assert!(!dir.path().join(".docfit").exists());
+}
+
+#[test]
+fn init_refuses_a_documents_table_it_cannot_add_a_line_to() {
+    let toml = "documents = { \"README.md\" = \"readme\" }\n";
+    let dir = repo(&[
+        ("docfit.toml", toml),
+        ("README.md", "r\n"),
+        ("CLAUDE.md", "c\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 2, "{answer}");
+    assert_eq!(
+        answer["error"][0]["fix"],
+        "write `documents` in docfit.toml as a `[documents]` table, a line per glob"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap(),
+        toml
+    );
+}
+
+#[test]
+fn a_tracked_file_gone_from_the_working_tree_is_refused_with_its_fix() {
+    let dir = repo(&[
+        ("docfit.toml", README_ONLY),
+        ("README.md", "r\n"),
+        ("SPEC.md", "s\n"),
+    ]);
+    std::fs::remove_file(dir.path().join("SPEC.md")).unwrap();
+    for command in ["check", "ratchet", "init"] {
+        let (code, answer) = docfit(dir.path(), &[command]);
+        assert_eq!(code, 2, "{command}: {answer}");
+        assert_eq!(
+            answer["error"][0]["fix"],
+            "restore `SPEC.md`, or `git rm` it"
+        );
+    }
+}
+
+#[test]
+fn init_on_a_repo_with_a_baseline_leaves_it_and_answers_what_check_would() {
+    let dir = repo(&[
+        ("docfit.toml", "[other]\nx = 1"),
+        (".docfit/baseline.json", "{}\n"),
+        ("README.md", "r\n"),
+        ("notes.md", "n\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(
+        answer["registered"],
+        serde_json::json!({ "README.md": "readme" })
+    );
+    assert_eq!(answer["rehome"], serde_json::json!([]));
+    assert_eq!(answer["faults"][0]["fault"], "unregistered", "{answer}");
+    assert_eq!(answer["faults"][0]["file"], "notes.md");
+    assert_eq!(answer["next"], answer["faults"][0]["fix"]);
+    assert_eq!(answer["changed"], true);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap(),
+        "[other]\nx = 1\n\n[documents]\n\"README.md\" = \"readme\"\n"
+    );
+    assert_eq!(baseline(dir.path()), serde_json::json!({}));
+}
+
+#[test]
+fn a_docfit_toml_it_cannot_read_is_refused_with_its_fix() {
+    let dir = repo(&[("README.md", "r\n")]);
+    std::fs::create_dir(dir.path().join("docfit.toml")).unwrap();
+    for command in ["check", "init"] {
+        let (code, answer) = docfit(dir.path(), &[command]);
+        assert_eq!(code, 2, "{command}: {answer}");
+        assert_eq!(
+            answer["error"][0]["fix"],
+            "make docfit.toml readable UTF-8 text, or restore it from git"
+        );
+    }
 }

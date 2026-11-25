@@ -79,19 +79,25 @@ impl Kind {
         Kind::ALL.into_iter().find(|k| k.name() == name)
     }
 
-    /// The kinds a file at `path` could be: the one its place conventionally
-    /// says, or, where its place says none, every kind.
-    pub(crate) fn candidates(path: &str) -> Vec<Kind> {
+    /// The kind a file at `path` is by its place, if its place says one:
+    /// `README.md` readme; `CLAUDE.md`, `AGENTS.md` and `docs/agents/` agent;
+    /// `GLOSSARY.md` glossary; `adr/` adr.
+    pub(crate) fn conventional(path: &str) -> Option<Kind> {
         let (dir, file) = path.rsplit_once('/').unwrap_or(("", path));
-        let conventional = match file.to_ascii_lowercase().as_str() {
+        match file.to_ascii_lowercase().as_str() {
             "readme.md" => Some(Kind::Readme),
             "claude.md" | "agents.md" => Some(Kind::Agent),
             "glossary.md" => Some(Kind::Glossary),
             _ if dir.ends_with("docs/agents") => Some(Kind::Agent),
             _ if dir.ends_with("adr") => Some(Kind::Adr),
             _ => None,
-        };
-        conventional.map_or_else(|| Kind::ALL.to_vec(), |k| vec![k])
+        }
+    }
+
+    /// The kinds a file at `path` could be: the one its place conventionally
+    /// says, or, where its place says none, every kind.
+    pub(crate) fn candidates(path: &str) -> Vec<Kind> {
+        Kind::conventional(path).map_or_else(|| Kind::ALL.to_vec(), |k| vec![k])
     }
 
     /// The kinds as a Markdown table, for the manual.
