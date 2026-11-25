@@ -1,0 +1,27 @@
+{
+  "tree": "b5c0a05de6313c50adf487777c537d4fefbb98c8+d1fba762150c532c",
+  "picker": "codex:01a212ef-a78b-7891-9862-05bf7f0417b1:default",
+  "author": "claude-code:69c5e78f-2457-5bff-9808-da0d930551d7:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/kind.rs:68:13: delete match arm \"readme.md\" in Kind::candidates",
+        "why": "The nested README test checks only the first suggested kind, and readme also comes first in the fallback list.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/documents.rs:99:37: replace > with < in check",
+        "why": "The notes.md test checks the placeholder and the JSON kinds array but never checks that the fix text lists the valid kinds.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/documents.rs:99:37: replace > with >= in check",
+        "why": "This appends a kind-choice hint to single-kind fixes, and the docs/agents test is the only one that checks such a fix verbatim.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}
