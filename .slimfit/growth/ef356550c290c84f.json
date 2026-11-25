@@ -1,0 +1,10 @@
+{
+  "tree": "923acc426daa9d8ae8dcbf4c9ca245d92b7d6701+d1fba762150c532c",
+  "lines": 293,
+  "serves": "docfit#6",
+  "considered": "documents::entries/check (extended with an entry budget rather than a second config table), slimfit-style baseline as a pure module beside documents, the existing refusal helper and repo reader",
+  "reviewer": "codex:01a212fa-0ffa-7db3-b788-4ae4412b0621:default",
+  "author": "claude-code:6c57a9b3-a769-5214-8480-30ae29f4d3bb:opus",
+  "cut": "In src/cli.rs and src/budget.rs, replace the parallel text vector and zip with one shared loader that measures each document as it reads it, preserves the collected read errors, and gives check and ratchet the same size and longest-line position. Pass the optional baseline directly to budget::check so it can derive adoption itself, and parse it in cli.rs using the existing refusal helper. In src/documents.rs, reuse a filtered iterator over matching entries for kind detection and budget minima instead of collecting a temporary vector.",
+  "answer": "Made all three: measured() reads and measures each document once (no texts vector, no zip); budget::check takes Option<&Baseline> and derives adopting; the baseline is parsed in cli.rs with refusal(); documents::check filters matching entries through a closure, no Vec"
+}

@@ -1,0 +1,27 @@
+{
+  "tree": "923acc426daa9d8ae8dcbf4c9ca245d92b7d6701+d1fba762150c532c",
+  "picker": "codex:01a212fa-0c53-7451-bad0-e0fbb622c824:default",
+  "author": "claude-code:6c57a9b3-a769-5214-8480-30ae29f4d3bb:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/budget.rs:26:22: replace > with >= in Size::of",
+        "why": "The reported line would shift to the last of two equally long lines, and the tests only assert the position of a unique longest line.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/budget.rs:129:17: replace > with >= in ratchet",
+        "why": "Ratchet would keep a baseline entry for a measure exactly at budget, while the shrink tests go strictly below budget.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/budget.rs:86:22: replace > with >= in check",
+        "why": "Ordinary budget faults would claim the baseline holds the document at its limit, and the tests only check that wording when a baseline raises the limit.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}
