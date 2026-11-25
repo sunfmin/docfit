@@ -43,6 +43,18 @@ fn help_is_the_manual() {
     assert!(out.contains("## Budgets"), "{out}");
     let (_, check) = docfit(&["check", "--help"]);
     assert!(check.contains("one of `.md`, `.toml`, `.json`,"), "{check}");
+    for (holds, bytes) in [
+        ("how to build and run it", 4096),
+        ("unwritten conventions", 2048),
+        ("one decision and why", 3072),
+        ("a line or two each", 8192),
+        ("how to do one task", 6144),
+    ] {
+        assert!(
+            out.contains(&format!("{holds} | {bytes} | 600 |")),
+            "{holds}: {out}"
+        );
+    }
     assert!(
         out.contains("| what the product shows or publishes | none; an entry may set one | 600 |"),
         "{out}"
