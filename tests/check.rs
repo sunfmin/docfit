@@ -505,6 +505,10 @@ fn init_registers_each_file_by_its_place_and_holds_the_rest_to_rehome_green_that
     assert_eq!(answer["faults"], serde_json::json!([]), "{answer}");
     assert_eq!(answer["changed"], true);
     assert_eq!(
+        answer["next"],
+        "commit docfit.toml and .docfit/baseline.json, then `docfit check`; register a file in `rehome` under a kind where one fits it"
+    );
+    assert_eq!(
         baseline(dir.path()),
         serde_json::json!({ "README.md": { "bytes": 5000 }, "SPEC.md": { "rehome": 5 } })
     );
@@ -519,6 +523,7 @@ fn init_registers_each_file_by_its_place_and_holds_the_rest_to_rehome_green_that
     assert_eq!(again["registered"], serde_json::json!({}), "{again}");
     assert_eq!(again["rehome"], serde_json::json!([]), "{again}");
     assert_eq!(again["changed"], false, "{again}");
+    assert_eq!(again["next"], "nothing to adopt: run `docfit check`");
     assert_eq!(
         std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap(),
         toml
@@ -670,6 +675,7 @@ fn init_on_a_repo_with_a_baseline_leaves_it_and_answers_what_check_would() {
     assert_eq!(answer["faults"][0]["fault"], "unregistered", "{answer}");
     assert_eq!(answer["faults"][0]["file"], "notes.md");
     assert_eq!(answer["next"], answer["faults"][0]["fix"]);
+    assert_eq!(answer["changed"], true);
     assert_eq!(
         std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap(),
         "[other]\nx = 1\n\n[documents]\n\"README.md\" = \"readme\"\n"
