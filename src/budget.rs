@@ -89,9 +89,9 @@ pub(crate) struct Stray<'a> {
     pub(crate) fault: &'a Value,
 }
 
-/// One document to judge: its path, its budget, its size, the number (from
-/// 1) of its longest line, and the `broken_pointer` faults on it, each naming
-/// its `pointer`.
+/// One document to judge: its path, its budget, its size, the number
+/// (from 1) of its longest line, and the `broken_pointer` faults on it, each
+/// naming its `pointer`.
 pub(crate) struct Measured<'a> {
     pub(crate) file: &'a str,
     pub(crate) budget: Size,
