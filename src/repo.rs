@@ -72,16 +72,13 @@ pub(crate) fn history(top: &Path, n: usize) -> Result<Vec<Commit>, Vec<Refusal>>
         .split('\0')
         .filter(|c| !c.is_empty())
         .map(|c| {
-            let mut lines = c.lines();
-            let (commit, subject) = lines
-                .next()
-                .unwrap_or("")
-                .split_once(' ')
-                .unwrap_or_default();
+            let (header, files) = c.split_once('\n').unwrap_or((c, ""));
+            let (commit, subject) = header.split_once(' ').unwrap_or((header, ""));
             Commit {
                 commit: commit.to_string(),
                 subject: subject.to_string(),
-                files: lines
+                files: files
+                    .lines()
                     .filter(|l| !l.is_empty())
                     .map(str::to_string)
                     .collect(),
