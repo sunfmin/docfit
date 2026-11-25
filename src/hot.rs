@@ -170,6 +170,8 @@ mod tests {
         assert_eq!((share.window, share.share), (100, 0.1));
         for bad in [
             "hot = { share = 1.5 }",
+            "hot = { share = 1.0 }",
+            "hot = { share = 0.0 }",
             "hot = { window = 0 }",
             "hot = { windows = 9 }",
             "hot = 3",
