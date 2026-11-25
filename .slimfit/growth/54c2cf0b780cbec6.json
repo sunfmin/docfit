@@ -1,0 +1,10 @@
+{
+  "tree": "e8d292c384d3a2daa7d144c87c42bf70f23d55ce+d1fba762150c532c",
+  "lines": 217,
+  "serves": "docfit#8",
+  "considered": "budget.rs and documents.rs for a line splitter to reuse (none: they measure and register, never edit text); the existing atomic write, reused for documents; Size::of's line walk, not reusable since fmt must keep fences and line endings",
+  "reviewer": "codex:01a21301-dd7f-7582-aaa6-954f67c525b7:default",
+  "author": "claude-code:502648f8-427c-5252-a9ea-1dbe8274bccc:opus",
+  "cut": "In src/sentences.rs, return the first changed line alongside the formatted text, record it when emitting the first break, and delete first_unformatted’s second pass over the lines. Group table lines with slice::split_inclusive and mark each group by whether it contains a delimiter row, replacing the manual index loop. In src/cli.rs, use the formatter’s returned line in check, move document selection into read so all three commands share it, and append .tmp directly to an OsString copy of the path in write. In tests/check.rs, make docfit accept an argument slice and delete the extra run wrapper. Workspace access was unavailable, so the review is based on the supplied diff.",
+  "answer": "made every cut: format returns (text, first broken line) and first_unformatted is gone; tables() groups by split_inclusive; check uses format's line; read takes the named files and refuses unregistered ones for all three commands; write appends .tmp to an OsString; tests' docfit takes an argument slice and run is gone"
+}
