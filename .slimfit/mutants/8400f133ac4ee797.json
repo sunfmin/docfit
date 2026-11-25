@@ -1,0 +1,33 @@
+{
+  "tree": "0450cb466423c5fe764b073a18983ad02c280030+d1fba762150c532c",
+  "picker": "codex:01a21301-7e4f-7c40-bd9c-1c5e3eb6774f:default",
+  "author": "claude-code:0e5ee7e2-10f5-5931-9376-53f7c02264ec:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/pointers.rs:103:31: replace match guard !line.is_empty() && line.chars().all(|c| c.is_ascii_digit()) with true in repo_path",
+        "why": "The tests cover a numeric suffix and `Kind::ALL`, whose prefix still fails path recognition after stripping. A nonnumeric suffix on a recognizable path would expose the change.",
+        "outcome": "killed",
+        "first_outcome": "survived"
+      },
+      {
+        "name": "src/pointers.rs:134:14: replace > with >= in adrs",
+        "why": "The ADR fixtures omit a delimiter followed by no digits, such as `ADR-` at the end of a line, which would now produce a fault.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/pointers.rs:134:54: replace + with - in adrs",
+        "why": "This corrupts the reported `pointer` for a missing ADR, while the tests assert its `missing` path, file, and line.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/pointers.rs:19:5: replace extensions -> String with String::new()",
+        "why": "The path tests exercise extension recognition without checking that CLI help lists the supported extensions.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}

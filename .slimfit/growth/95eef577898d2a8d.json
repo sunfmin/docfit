@@ -1,0 +1,10 @@
+{
+  "tree": "b5c0a05de6313c50adf487777c537d4fefbb98c8+d1fba762150c532c",
+  "lines": 310,
+  "serves": "docfit#5",
+  "considered": "src/main.rs answer() (replaced by agent-help/clap in cli.rs, deleted); slimfit and truefit have no reusable docs-registry code; agent-help #[derive(Help)] tables (not used: its snake_case names would make design-note design_note)",
+  "reviewer": "codex:01a212ef-a359-7091-8a5b-3dc293aaa1a3:default",
+  "author": "claude-code:69c5e78f-2457-5bff-9808-da0d930551d7:opus",
+  "cut": "In src/kind.rs, return the name, reader, and description from one match and reuse it for lookup and help. In src/cli.rs, use check(repo).unwrap_or_else(refused) and serialize the Refusal type from src/documents.rs directly instead of rebuilding each error as JSON. In gate.sh, replace the separate build and binary invocation with cargo run --quiet -- check. In tests/binary.rs, check the manual heading and kinds table from the same --help invocation.",
+  "answer": "Made all four cuts (commit \"the growth reviewer's cuts\"): Kind::facts is the one match; check(repo).unwrap_or_else(refused) with Refusal deriving Serialize; gate.sh runs cargo run --quiet -- check; one --help test checks heading and kinds table."
+}

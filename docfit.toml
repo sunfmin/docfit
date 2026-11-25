@@ -1,0 +1,4 @@
+# docfit's own documents, each under its kind (`docfit check --help`); the gate runs `docfit check` on them.
+[documents]
+"README.md" = "readme"
+"CLAUDE.md" = "agent"

@@ -1,0 +1,29 @@
+{
+  "tip": "6bad0d8909249998c277d31f8a129714c90b8bbc",
+  "from": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+  "pool": 8,
+  "drawn": {
+    "rust": [
+      {
+        "name": "src/main.rs:7:5: replace answer -> (i32, String) with (-1, String::new())",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/main.rs:20:5: replace main with ()",
+        "outcome": "survived"
+      },
+      {
+        "name": "src/main.rs:7:5: replace answer -> (i32, String) with (-1, \"xyzzy\".into())",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/main.rs:7:5: replace answer -> (i32, String) with (1, \"xyzzy\".into())",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/main.rs:7:5: replace answer -> (i32, String) with (0, String::new())",
+        "outcome": "killed"
+      }
+    ]
+  }
+}
