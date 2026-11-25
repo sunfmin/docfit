@@ -863,3 +863,65 @@ fn a_docfit_toml_it_cannot_read_is_refused_with_its_fix() {
         );
     }
 }
+
+#[test]
+fn init_holds_the_broken_pointers_present_so_check_is_green_on_them_that_day() {
+    let readme = "# r\n\nSee `docs/gone.md`. Then read on.\n";
+    let dir = repo(&[("README.md", readme), ("src/main.rs", "fn main() {}\n")]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 0, "{answer}");
+    let faults: Vec<_> = answer["faults"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| &f["fault"])
+        .collect();
+    assert_eq!(
+        faults,
+        ["unformatted"],
+        "the pointer is held, the prose left as it is: {answer}"
+    );
+    assert_eq!(
+        baseline(dir.path()),
+        serde_json::json!({ "README.md": { "pointers": ["docs/gone.md"] } })
+    );
+    std::fs::write(dir.path().join("README.md"), "# r\n\nSee `docs/gone.md`.\n").unwrap();
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 0, "{checked}");
+
+    let two = "# r\n\nSee `docs/gone.md`.\nAnd `docs/lost.md`.\n";
+    std::fs::write(dir.path().join("README.md"), two).unwrap();
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 1, "{checked}");
+    let faults = checked["faults"].as_array().unwrap();
+    assert_eq!(faults.len(), 1, "{checked}");
+    assert_eq!(faults[0]["fault"], "broken_pointer");
+    assert_eq!(faults[0]["pointer"], "docs/lost.md");
+    docfit(dir.path(), &["ratchet"]);
+    assert_eq!(
+        baseline(dir.path()),
+        serde_json::json!({ "README.md": { "pointers": ["docs/gone.md"] } }),
+        "ratchet never holds a pointer broken after adoption"
+    );
+
+    std::fs::write(dir.path().join("README.md"), "# r\n\nSee `src/main.rs`.\n").unwrap();
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 0, "{checked}");
+    assert!(
+        checked["next"]
+            .as_str()
+            .unwrap()
+            .starts_with("run `docfit ratchet`"),
+        "{checked}"
+    );
+    let (_, ratcheted) = docfit(dir.path(), &["ratchet"]);
+    assert_eq!(ratcheted["changed"], true);
+    assert_eq!(baseline(dir.path()), serde_json::json!({}));
+
+    std::fs::write(dir.path().join("README.md"), readme).unwrap();
+    let (code, checked) = check(dir.path());
+    assert_eq!(
+        code, 1,
+        "a pointer dropped from the baseline is red again: {checked}"
+    );
+}

@@ -33,7 +33,7 @@ pub(crate) const EXIT_ERROR: i32 = 2;
 ///
 /// ## Budgets
 ///
-/// Each document has a budget: its size in bytes, and its longest line in characters. The table above gives each kind's default; a `docfit.toml` entry may set its own (see `docfit check --help`). `docfit check` is red on a document over its budget, unless the baseline, `{const:BASELINE}`, holds it at more: then it is red only once it grows past what the baseline holds. `docfit ratchet` moves the baseline down to the documents' sizes now, and never up. A Markdown file no kind fits (there is no spec kind) may be held **to rehome**: `docfit check` is green on it while it does not grow, and red once it does; `docfit ratchet` only shrinks what it is held at, and drops it once the file is gone or registered under a kind. So a repo adopting docfit with a document far over its budget, or a file no kind fits, runs `docfit init` (or, with its `docfit.toml` written, `docfit ratchet`) once and is green that day, and every change after can only shrink it.
+/// Each document has a budget: its size in bytes, and its longest line in characters. The table above gives each kind's default; a `docfit.toml` entry may set its own (see `docfit check --help`). `docfit check` is red on a document over its budget, unless the baseline, `{const:BASELINE}`, holds it at more: then it is red only once it grows past what the baseline holds. `docfit ratchet` moves the baseline down to the documents' sizes now, and never up. A Markdown file no kind fits (there is no spec kind) may be held **to rehome**: `docfit check` is green on it while it does not grow, and red once it does; `docfit ratchet` only shrinks what it is held at, and drops it once the file is gone or registered under a kind. A pointer broken when a repo adopts docfit is held too, by its document and the pointer: `docfit check` is green on it, and red on a pointer broken since; `docfit ratchet` drops it once it is fixed, and never adds one. So a repo adopting docfit with a document far over its budget, a broken pointer, or a file no kind fits, runs `docfit init` (or, with its `docfit.toml` written, `docfit ratchet`) once and is green that day, and every change after can only shrink it.
 ///
 /// ## Pointers
 ///
@@ -77,7 +77,7 @@ enum Cmd {
     ///
     /// In a glob, `*` and `?` stay within one directory and `**` crosses directories, as in a `.gitignore`. A measure no matching entry sets is the kind's default; where several set it, the smallest holds.
     ///
-    /// The baseline maps a document to the measures it is held at over its budget, and a file registered under no kind to the bytes it is held at to rehome, as `docfit ratchet` writes it: `{"README.md": {"bytes": 65536, "line": 312}, "SPEC.md": {"rehome": 15360}}`. A document within its budget is held at its budget.
+    /// The baseline maps a document to the measures it is held at over its budget and the pointers it is held at broken, and a file registered under no kind to the bytes it is held at to rehome, as `docfit ratchet` writes it: `{"README.md": {"bytes": 65536, "line": 312, "pointers": ["docs/old.md"]}, "SPEC.md": {"rehome": 15360}}`. A document within its budget is held at its budget. A pointer is held by what it is written as, its `pointer`: the same pointer written again in that document is held too.
     ///
     /// ## What it answers
     ///
@@ -89,7 +89,7 @@ enum Cmd {
     ///   - `over_budget`: its size in bytes, `size`, is over `limit`, its budget or, when the baseline holds it at more, that.
     ///   - `line_too_long`: its line `line` is `size` characters, over `limit`, as above. The fix is to break it at its sentences, one per line, which `docfit fmt` does; a sentence still too long is cut by hand.
     ///   - `unformatted`: `docfit fmt` would change it, first at its line `line`: some line holds more than one sentence. The fix is `docfit fmt <file>`.
-    ///   - `broken_pointer`: its line `line` points, as `pointer`, at `missing`, which git does not track. A pointer is:
+    ///   - `broken_pointer`: its line `line` points, as `pointer`, at `missing`, which git does not track, and the baseline does not hold that pointer broken in that document. A pointer is:
     ///     - a backticked repo path: with a `/` in it, or a name ending in one of {const:EXTENSIONS}, and none of a command's space, a glob's `*`, a placeholder's `<>`, a URL's `:` (but a `:<line>` after it), or a leading `/` or `~`. A name with a `/` and none of those extensions is a pointer only when its first segment (`src` of `src/a/b`) is something git tracks at the repo's top or in the document's directory; otherwise it is a name, such as a model id `org/model` or a git ref `origin/main`, and is not checked. A pointer is read from the repo's top or the document's directory, and is there if either is.
     ///     - a Markdown link's target, `[text](target)`, read from the document's directory (a leading `/` is the repo's top), without its `#anchor`. A URL (`https:`, `mailto:`) and an anchor alone are not checked.
     ///     - an ADR named by number, `ADR 0007` or `ADR-0007`: there must be a file `{const:ADRS}0007-*`.
@@ -131,7 +131,7 @@ enum Cmd {
         #[arg(long, verbatim_doc_comment)]
         repo: Option<PathBuf>,
     },
-    /// Adopts docfit on a repo in one command: registers each Markdown file by the kind its place says, holds the rest to rehome, and writes the baseline at today's sizes, so `docfit check` is green that day.
+    /// Adopts docfit on a repo in one command: registers each Markdown file by the kind its place says, holds the rest to rehome, and writes the baseline at today's sizes and broken pointers, so `docfit check` is green that day.
     ///
     /// ## When to run it
     ///
@@ -139,7 +139,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads what `docfit check` reads; without a `{const:CONFIG}` it starts one. It adds a line `"<path>" = "<kind>"` to the `[documents]` table for each Markdown file git tracks that no glob matches and whose place says its kind: `README.md` is `readme`; `CLAUDE.md`, `AGENTS.md` and a file in `docs/agents/` are `agent`; a file in `adr/` (such as `docs/adr/`) is `adr`; `GLOSSARY.md` is `glossary`. Every line already in `{const:CONFIG}`, and its comments, are kept as they are. Without a baseline yet, it writes `{const:BASELINE}` as `docfit ratchet` does on a repo without one: each document over its budget held at its size now, and each Markdown file registered under no kind held to rehome at its size now. With a baseline, it leaves it as it is: once a repo has adopted docfit, its baseline only tightens. Each file is written whole, through a file beside it renamed over it, and only when it changes.
+    /// It reads what `docfit check` reads; without a `{const:CONFIG}` it starts one. It adds a line `"<path>" = "<kind>"` to the `[documents]` table for each Markdown file git tracks that no glob matches and whose place says its kind: `README.md` is `readme`; `CLAUDE.md`, `AGENTS.md` and a file in `docs/agents/` are `agent`; a file in `adr/` (such as `docs/adr/`) is `adr`; `GLOSSARY.md` is `glossary`. Every line already in `{const:CONFIG}`, and its comments, are kept as they are. Without a baseline yet, it writes `{const:BASELINE}` as `docfit ratchet` does on a repo without one: each document over its budget held at its size now, each pointer broken now held in its document, and each Markdown file registered under no kind held to rehome at its size now. With a baseline, it leaves it as it is: once a repo has adopted docfit, its baseline only tightens. Each file is written whole, through a file beside it renamed over it, and only when it changes.
     ///
     /// ## What it answers
     ///
@@ -159,7 +159,7 @@ enum Cmd {
     ///     { "file": "SPEC.md", "size": 15360, "kinds": ["readme", "agent", "adr", "glossary", "design-note"], "fix": "add `\"SPEC.md\" = \"<kind>\"` under `[documents]` in docfit.toml, <kind> one of readme, agent, adr, glossary, design-note" }
     ///   ],
     ///   "faults": [],
-    ///   "baseline": { "README.md": { "bytes": 65536 }, "SPEC.md": { "rehome": 15360 } },
+    ///   "baseline": { "README.md": { "bytes": 65536, "pointers": ["docs/old.md"] }, "SPEC.md": { "rehome": 15360 } },
     ///   "changed": true,
     ///   "next": "commit docfit.toml and .docfit/baseline.json, then `docfit check`; register a file in `rehome` under a kind where one fits it"
     /// }
@@ -189,12 +189,12 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads what `docfit check` reads, and writes `{const:BASELINE}` (whole, through a file beside it renamed over it) when the baseline moves. With no baseline yet, it holds each document over its budget, in each measure it is over, at its size now, and each Markdown file registered under no kind to rehome, at its size in bytes now. With one, a file held to rehome is held at the smaller of what is held and its size now, and leaves it once it is gone or registered under a kind; a file registered under no kind it does not hold is never added; each measure held moves to the smaller of what is held and the size now; a measure it does not hold stays unheld, so a document that grows over its budget is never added; a measure back within budget leaves it.
+    /// It reads what `docfit check` reads, and writes `{const:BASELINE}` (whole, through a file beside it renamed over it) when the baseline moves. With no baseline yet, it holds each document over its budget, in each measure it is over, at its size now, and each Markdown file registered under no kind to rehome, at its size in bytes now. With one, a file held to rehome is held at the smaller of what is held and its size now, and leaves it once it is gone or registered under a kind; a file registered under no kind it does not hold is never added; each measure held moves to the smaller of what is held and the size now; a measure it does not hold stays unheld, so a document that grows over its budget is never added; a measure back within budget leaves it. Broken pointers likewise: with no baseline yet, each pointer broken now is held in its document; with one, a held pointer leaves once it is fixed (or its document goes), and a pointer broken since is never added.
     ///
     /// ## What it answers
     ///
     /// - `changed`: whether the baseline moved. `false` is nothing to ratchet, and it writes nothing.
-    /// - `baseline`: the baseline now, each held document with its held `bytes` and `line`.
+    /// - `baseline`: the baseline now, each held document with its held `bytes`, `line` and `pointers`.
     /// - `next`: commit the baseline, or that there is nothing to ratchet.
     ///
     /// It exits {const:EXIT_OK}.
@@ -205,7 +205,7 @@ enum Cmd {
     ///
     /// ## What trips you up
     ///
-    /// - Deleting the baseline and running it again holds every document at its size now, and every file registered under no kind to rehome: that is adopting docfit again, and shows in the diff.
+    /// - Deleting the baseline and running it again holds every document at its size now, every broken pointer, and every file registered under no kind to rehome: that is adopting docfit again, and shows in the diff.
     #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
     Ratchet {
         /// The repository to ratchet (default: the one containing the current directory).
@@ -450,8 +450,8 @@ fn read<'a>(
     }
 }
 
-/// Each document read, measured.
-fn measured<'a>(texts: &'a [(&'a str, Document, String)]) -> Vec<Measured<'a>> {
+/// Each document read, measured, with its pointers to what is not in `tree`.
+fn measured<'a>(texts: &'a [(&'a str, Document, String)], tree: &Tree) -> Vec<Measured<'a>> {
     texts
         .iter()
         .map(|(file, doc, text)| {
@@ -461,6 +461,7 @@ fn measured<'a>(texts: &'a [(&'a str, Document, String)]) -> Vec<Measured<'a>> {
                 budget: doc.budget,
                 size,
                 at,
+                broken: pointers::check(file, text, tree),
             }
         })
         .collect()
@@ -496,13 +497,13 @@ fn strays<'a>(top: &Path, answer: &'a Answer) -> Result<Vec<Stray<'a>>, Vec<Refu
 }
 
 /// Every fault, in path order: `answer`'s that are not a stray's, those
-/// `budget::check` finds in `texts` and `strays` against `baseline`, and each
-/// document's broken pointers and unformatted prose against `tracked`.
+/// `budget::check` finds in `docs` and `strays` against `baseline`, and each
+/// document's unformatted prose in `texts`.
 fn faults(
     answer: &Answer,
     texts: &[(&str, Document, String)],
+    docs: &[Measured],
     strays: &[Stray],
-    tracked: &[String],
     baseline: Option<&Baseline>,
 ) -> Vec<Value> {
     let mut faults: Vec<Value> = answer
@@ -511,10 +512,8 @@ fn faults(
         .filter(|f| f["fault"] != "unregistered")
         .cloned()
         .collect();
-    faults.extend(budget::check(&measured(texts), strays, baseline));
-    let tree = Tree::new(tracked);
+    faults.extend(budget::check(docs, strays, baseline));
     for (file, _, text) in texts {
-        faults.extend(pointers::check(file, text, &tree));
         if let (_, Some(line)) = sentences::format(text) {
             faults.push(json!({
                 "file": file, "fault": "unformatted", "line": line,
@@ -546,10 +545,10 @@ fn baseline(top: &Path) -> Result<Option<Baseline>, Vec<Refusal>> {
 fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let (top, answer, tracked) = registered(repo)?;
     let texts = read(&top, &answer, &[])?;
-    let docs = measured(&texts);
+    let docs = measured(&texts, &Tree::new(&tracked));
     let strays = strays(&top, &answer)?;
     let held = baseline(&top)?;
-    let faults = faults(&answer, &texts, &strays, &tracked, held.as_ref());
+    let faults = faults(&answer, &texts, &docs, &strays, held.as_ref());
     let tighter = held
         .as_ref()
         .is_some_and(|h| &budget::ratchet(&docs, &strays, Some(h)) != h);
@@ -587,10 +586,11 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let answer = documents::check(&documents::config(&text)?.entries, &files);
     let texts = read(&top, &answer, &[])?;
     let strays = strays(&top, &answer)?;
+    let docs = measured(&texts, &Tree::new(&files));
     let (next, adopted) = match baseline(&top)? {
         Some(held) => (held, false),
         None => {
-            let next = budget::ratchet(&measured(&texts), &strays, None);
+            let next = budget::ratchet(&docs, &strays, None);
             write(&top.join(BASELINE), &(pretty(&json!(next)) + "\n"))?;
             (next, true)
         }
@@ -604,7 +604,7 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
         .filter(|_| adopted)
         .map(|s| json!({ "file": s.file, "size": s.bytes, "kinds": s.fault["kinds"], "fix": s.fault["fix"] }))
         .collect();
-    let faults = faults(&answer, &texts, &strays, &files, Some(&next));
+    let faults = faults(&answer, &texts, &docs, &strays, Some(&next));
     let changed = adopted || wrote_config;
     let then = match faults.first() {
         Some(first) => first["fix"].clone(),
@@ -625,9 +625,9 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
 }
 
 fn ratchet(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
-    let (top, answer, _) = registered(repo)?;
+    let (top, answer, tracked) = registered(repo)?;
     let texts = read(&top, &answer, &[])?;
-    let docs = measured(&texts);
+    let docs = measured(&texts, &Tree::new(&tracked));
     let held = baseline(&top)?;
     let strays = strays(&top, &answer)?;
     let next = budget::ratchet(&docs, &strays, held.as_ref());
