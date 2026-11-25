@@ -112,52 +112,35 @@ fn repo_path(span: &str) -> Option<&str> {
 
 /// The local targets of the Markdown links in `text`: `[..](target)`, without
 /// a title or `#anchor`; a URL or an anchor alone is not one.
-fn links(text: &str) -> Vec<&str> {
-    let mut targets = Vec::new();
-    for (_, rest) in text.match_indices("](").map(|(i, _)| text.split_at(i + 2)) {
-        let target = rest.split(')').next().unwrap_or("");
-        let target = target.trim().trim_start_matches('<');
-        let target = target.split(['>', ' ', '#', '?']).next().unwrap_or("");
-        let url = target.split('/').next().is_some_and(|s| s.contains(':'));
-        if !target.is_empty() && !url {
-            targets.push(target);
-        }
-    }
-    targets
+fn links(text: &str) -> impl Iterator<Item = &str> {
+    text.split("](").skip(1).filter_map(|rest| {
+        let target = rest.split(')').next()?.trim().trim_start_matches('<');
+        let target = target.split(['>', ' ', '#', '?']).next()?;
+        let url = target.split('/').next()?.contains(':');
+        (!target.is_empty() && !url).then_some(target)
+    })
 }
 
 /// Each ADR `text` names by number, `ADR 0007` or `ADR-0007`: as written, and
 /// its number.
-fn adrs(text: &str) -> Vec<(&str, &str)> {
-    let mut named = Vec::new();
-    for (i, _) in text.match_indices("ADR") {
-        let before = text[..i].chars().next_back();
-        let rest = &text[i + 3..];
-        let digits = rest.get(1..).unwrap_or("");
-        let len = digits
+fn adrs(text: &str) -> impl Iterator<Item = (&str, &str)> {
+    text.match_indices("ADR").filter_map(|(i, _)| {
+        let rest = text[i + 3..].strip_prefix([' ', '-'])?;
+        let len = rest
             .find(|c: char| !c.is_ascii_digit())
-            .unwrap_or(digits.len());
-        let after = digits[len..].chars().next();
-        if rest.starts_with([' ', '-'])
-            && len > 0
-            && !before.is_some_and(char::is_alphanumeric)
-            && !after.is_some_and(char::is_alphanumeric)
-        {
-            named.push((&text[i..i + 4 + len], &digits[..len]));
-        }
-    }
-    named
+            .unwrap_or(rest.len());
+        let alnum = |c: Option<char>| c.is_some_and(char::is_alphanumeric);
+        let bounded = !alnum(text[..i].chars().next_back()) && !alnum(rest[len..].chars().next());
+        (len > 0 && bounded).then(|| (&text[i..i + 4 + len], &rest[..len]))
+    })
 }
 
 /// `path` from directory `dir`, both from the repo's top, with `.` and `..`
 /// walked; `None` when it climbs out of the repo. A leading `/` is the top.
 fn resolve(dir: &str, path: &str) -> Option<String> {
-    let mut parts: Vec<&str> = if path.starts_with('/') {
-        Vec::new()
-    } else {
-        dir.split('/').filter(|p| !p.is_empty()).collect()
-    };
-    for part in path.split('/') {
+    let dir = if path.starts_with('/') { "" } else { dir };
+    let mut parts = Vec::new();
+    for part in dir.split('/').chain(path.split('/')) {
         match part {
             "" | "." => {}
             ".." => {
@@ -166,10 +149,6 @@ fn resolve(dir: &str, path: &str) -> Option<String> {
             part => parts.push(part),
         }
     }
-    let joined = parts.join("/");
-    Some(if path.ends_with('/') {
-        joined + "/"
-    } else {
-        joined
-    })
+    let slash = if path.ends_with('/') { "/" } else { "" };
+    Some(parts.join("/") + slash)
 }
