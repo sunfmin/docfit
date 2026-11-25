@@ -1,4 +1,4 @@
-//! The real binary: its stdout and exit code.
+//! The real binary: its stdout and exit code; it writes nothing to stderr.
 
 use std::process::Command;
 
@@ -7,6 +7,11 @@ fn docfit(args: &[&str]) -> (i32, String) {
         .args(args)
         .output()
         .unwrap();
+    assert!(
+        out.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     (
         out.status.code().unwrap(),
         String::from_utf8(out.stdout).unwrap(),
