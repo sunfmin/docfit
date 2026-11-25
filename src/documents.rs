@@ -96,6 +96,15 @@ pub(crate) struct Answer {
     pub(crate) faults: Vec<Value>,
 }
 
+impl Answer {
+    /// The bytes of the documents of the kind `agent`, each `bytes(file)`:
+    /// what every agent reads on every turn.
+    pub(crate) fn must_read(&self, bytes: impl Fn(&str) -> usize) -> usize {
+        let agent = self.documents.iter().filter(|(_, d)| d.kind == Kind::Agent);
+        agent.map(|(f, _)| bytes(f)).sum()
+    }
+}
+
 /// An entry's value: a kind's name, or a table that also sets a budget.
 #[derive(serde::Deserialize)]
 #[serde(untagged)]

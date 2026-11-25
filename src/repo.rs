@@ -4,6 +4,7 @@
 use crate::cli::refusal;
 use crate::documents::Refusal;
 use crate::hot::Commit;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -85,4 +86,33 @@ pub(crate) fn history(top: &Path, n: usize) -> Result<Vec<Commit>, Vec<Refusal>>
             }
         })
         .collect())
+}
+
+/// The bytes of each path a commit tracks.
+pub(crate) type Sizes = BTreeMap<String, usize>;
+
+/// The commit that last changed `path` (short), `file`'s text at it, and its
+/// [`Sizes`]; none before a commit changes `path` or holds `file`.
+pub(crate) fn at_last_change(
+    top: &Path,
+    path: &str,
+    file: &str,
+) -> Option<(String, String, Sizes)> {
+    let commit = git(top, &["log", "-1", "--format=%h", "--", path]).ok()?;
+    let commit = String::from_utf8_lossy(&commit).trim().to_string();
+    let text = git(top, &["show", &format!("{commit}:{file}")]).ok()?;
+    let tree = git(top, &["ls-tree", "-r", "-l", "-z", &commit]).ok()?;
+    let sizes = tree.split(|b| *b == 0).filter_map(|e| {
+        let e = String::from_utf8_lossy(e);
+        let (header, path) = e.split_once('\t')?;
+        Some((
+            path.to_string(),
+            header.split_whitespace().nth(3)?.parse().ok()?,
+        ))
+    });
+    Some((
+        commit,
+        String::from_utf8_lossy(&text).into_owned(),
+        sizes.collect(),
+    ))
 }
