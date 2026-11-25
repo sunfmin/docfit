@@ -1086,3 +1086,22 @@ fn init_adds_to_an_ignore_already_written_and_leaves_a_directory_an_entry_regist
         "# ours\nignore = [\"vendor/**\", \"app/test/**\"]\n\n[documents]\n\"README.md\" = \"readme\"\n\"lib/src/guide.md\" = \"readme\"\n"
     );
 }
+
+#[test]
+fn init_refuses_an_ignore_it_cannot_add_a_glob_to_and_writes_nothing() {
+    let toml = "\"ignore\" = []\n[documents]\n";
+    let dir = repo(&[("docfit.toml", toml), ("src/help.md", "h\n")]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 2, "{answer}");
+    assert!(
+        answer["error"][0]["fix"].as_str().unwrap().starts_with(
+            "write `ignore = [\"<glob>\", ...]` in docfit.toml at the start of a line"
+        ),
+        "{answer}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap(),
+        toml
+    );
+    assert!(!dir.path().join(".docfit").exists());
+}
