@@ -28,7 +28,7 @@ fn help_is_the_manual() {
     );
     assert!(
         out.contains(
-            "| kind | reader | holds only |\n|---|---|---|\n| `readme` | someone new to the repo |"
+            "| kind | reader | holds only | bytes | longest line |\n|---|---|---|---|---|\n| `readme` | someone new to the repo |"
         ),
         "{out}"
     );
@@ -36,6 +36,11 @@ fn help_is_the_manual() {
         out.contains("| `design-note` | whoever changes one cross-module mechanism |"),
         "{out}"
     );
+    assert!(
+        out.contains("one mechanism; off unless the repo turns it on | 6144 | 200 |"),
+        "{out}"
+    );
+    assert!(out.contains("## Budgets"), "{out}");
 }
 
 #[test]

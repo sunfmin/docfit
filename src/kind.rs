@@ -1,5 +1,8 @@
 //! The kinds of document, fixed in docfit: each kind's name, reader and what
-//! it holds. This enum is their one home; the manual's table is made from it.
+//! it holds, and its default budget. This enum is their one home; the
+//! manual's table is made from it.
+
+use crate::budget::Size;
 
 /// A kind of document a repo registers its Markdown files under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +55,22 @@ impl Kind {
         }
     }
 
+    /// The kind's default budget: a document's size in bytes, and its longest
+    /// line in characters. A `docfit.toml` entry may set its own.
+    pub(crate) fn budget(self) -> Size {
+        let kb = match self {
+            Kind::Readme => 4,
+            Kind::Agent => 2,
+            Kind::Adr => 3,
+            Kind::Glossary => 8,
+            Kind::DesignNote => 6,
+        };
+        Size {
+            bytes: kb * 1024,
+            line: 200,
+        }
+    }
+
     pub(crate) fn name(self) -> &'static str {
         self.facts().0
     }
@@ -77,9 +96,15 @@ impl Kind {
 
     /// The kinds as a Markdown table, for the manual.
     pub(crate) fn table() -> String {
-        let mut table = String::from("| kind | reader | holds only |\n|---|---|---|\n");
-        for (name, reader, holds) in Kind::ALL.map(Kind::facts) {
-            table.push_str(&format!("| `{name}` | {reader} | {holds} |\n"));
+        let mut table = String::from(
+            "| kind | reader | holds only | bytes | longest line |\n|---|---|---|---|---|\n",
+        );
+        for kind in Kind::ALL {
+            let ((name, reader, holds), budget) = (kind.facts(), kind.budget());
+            table.push_str(&format!(
+                "| `{name}` | {reader} | {holds} | {} | {} |\n",
+                budget.bytes, budget.line
+            ));
         }
         table
     }

@@ -1,6 +1,7 @@
 //! docfit: keeps a repo's documents each in its one home, within its budget.
 //! `docfit --help` is the manual and its only copy.
 
+mod budget;
 mod cli;
 mod documents;
 mod kind;

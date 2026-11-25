@@ -2,6 +2,7 @@
 //! `docfit.toml` registers, under which kind. Pure: the files and the
 //! config's text arrive as arguments.
 
+use crate::budget::Size;
 use crate::kind::Kind;
 use globset::{GlobBuilder, GlobMatcher};
 use serde_json::{Value, json};
@@ -19,14 +20,49 @@ pub(crate) struct Refusal {
     pub(crate) fix: String,
 }
 
-/// The check's answer: each document's kind, and each fault with its fix.
+/// One line of `[documents]`: its glob, its kind, and the measures of the
+/// budget it sets itself.
+pub(crate) struct Entry {
+    matcher: GlobMatcher,
+    kind: Kind,
+    bytes: Option<usize>,
+    line: Option<usize>,
+}
+
+/// A registered document: its kind, and its budget.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Document {
+    pub(crate) kind: Kind,
+    pub(crate) budget: Size,
+}
+
+/// The check's answer: each document, and each fault with its fix.
 pub(crate) struct Answer {
-    pub(crate) documents: BTreeMap<String, &'static str>,
+    pub(crate) documents: BTreeMap<String, Document>,
     pub(crate) faults: Vec<Value>,
 }
 
-/// `docfit.toml`'s entries, glob and kind, in the order written.
-pub(crate) fn entries(config: &str) -> Result<Vec<(GlobMatcher, Kind)>, Vec<Refusal>> {
+/// An entry's value: a kind's name, or a table that also sets a budget.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum Entered {
+    Kind(String),
+    Budget(Budgeted),
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Budgeted {
+    kind: String,
+    bytes: Option<usize>,
+    line: Option<usize>,
+}
+
+/// How an entry is written, for a fix.
+const SHAPES: &str = "`\"<kind>\"` or `{ kind = \"<kind>\", bytes = <n>, line = <n> }`";
+
+/// `docfit.toml`'s entries.
+pub(crate) fn entries(config: &str) -> Result<Vec<Entry>, Vec<Refusal>> {
     let table: toml::Table = config.parse().map_err(|e: toml::de::Error| {
         vec![Refusal {
             fault: format!("{CONFIG} is not TOML: {}", e.message()),
@@ -42,17 +78,33 @@ pub(crate) fn entries(config: &str) -> Result<Vec<(GlobMatcher, Kind)>, Vec<Refu
         }]);
     };
     let (mut entries, mut refusals) = (Vec::new(), Vec::new());
-    for (glob, kind) in documents {
-        let kind = match kind.as_str() {
-            Some(name) => Kind::named(name).ok_or(name.to_string()),
-            None => Err(kind.to_string()),
+    for (glob, value) in documents {
+        let (kind, bytes, line) = match value.clone().try_into() {
+            Ok(Entered::Kind(name)) => (name, None, None),
+            Ok(Entered::Budget(b)) => (b.kind, b.bytes, b.line),
+            Err(_) => {
+                refusals.push(Refusal {
+                    fault: format!("`{glob}` = `{value}` is not an entry docfit reads"),
+                    fix: format!(
+                        "give `{glob}` one of the kinds {}, as {SHAPES}",
+                        Kind::names(&Kind::ALL)
+                    ),
+                });
+                continue;
+            }
         };
+        let kind = Kind::named(&kind).ok_or(kind);
         let matcher = GlobBuilder::new(glob)
             .literal_separator(true)
             .build()
             .map(|g| g.compile_matcher());
         match (kind, matcher) {
-            (Ok(kind), Ok(matcher)) => entries.push((matcher, kind)),
+            (Ok(kind), Ok(matcher)) => entries.push(Entry {
+                matcher,
+                kind,
+                bytes,
+                line,
+            }),
             (Err(name), _) => refusals.push(Refusal {
                 fault: format!("`{glob}` names the kind `{name}`, which docfit does not know"),
                 fix: format!("give `{glob}` one of the kinds {}", Kind::names(&Kind::ALL)),
@@ -71,21 +123,42 @@ pub(crate) fn entries(config: &str) -> Result<Vec<(GlobMatcher, Kind)>, Vec<Refu
 }
 
 /// The check of `files`, the repo's tracked paths, against `entries`.
-pub(crate) fn check(entries: &[(GlobMatcher, Kind)], files: &[String]) -> Answer {
+pub(crate) fn check(entries: &[Entry], files: &[String]) -> Answer {
     let mut answer = Answer {
         documents: BTreeMap::new(),
         faults: Vec::new(),
     };
     for file in files.iter().filter(|f| f.ends_with(".md")) {
+        let matching: Vec<&Entry> = entries
+            .iter()
+            .filter(|e| e.matcher.is_match(file))
+            .collect();
         let mut kinds: Vec<Kind> = Vec::new();
-        for (matcher, kind) in entries {
-            if matcher.is_match(file) && !kinds.contains(kind) {
-                kinds.push(*kind);
+        for entry in &matching {
+            if !kinds.contains(&entry.kind) {
+                kinds.push(entry.kind);
             }
         }
         match kinds.as_slice() {
             [kind] => {
-                answer.documents.insert(file.clone(), kind.name());
+                let set = |measure: fn(&Entry) -> Option<usize>, default: usize| {
+                    matching
+                        .iter()
+                        .filter_map(|e| measure(e))
+                        .min()
+                        .unwrap_or(default)
+                };
+                let budget = Size {
+                    bytes: set(|e| e.bytes, kind.budget().bytes),
+                    line: set(|e| e.line, kind.budget().line),
+                };
+                answer.documents.insert(
+                    file.clone(),
+                    Document {
+                        kind: *kind,
+                        budget,
+                    },
+                );
             }
             [] => {
                 let candidates = Kind::candidates(file);
