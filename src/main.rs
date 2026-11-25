@@ -1,12 +1,16 @@
 //! docfit: keeps a repo's documents each in its one home, within its budget.
 //! `docfit --help` is the manual and its only copy.
 
+// build.rs runs it to stamp the version; compiled here too, for its tests.
+#[cfg_attr(not(test), allow(dead_code))]
+mod version;
+
 const MANUAL: &str = "docfit: keeps a repo's documents each in its one home, within its budget.\n\nNo command is built yet: see the repo's open issues.\n";
 
 fn answer(args: &[String]) -> (i32, String) {
     match args.first().map(String::as_str) {
         None | Some("--help") | Some("-h") | Some("help") => (0, MANUAL.to_string()),
-        Some("--version") | Some("-V") => (0, format!("docfit {}\n", env!("CARGO_PKG_VERSION"))),
+        Some("--version") | Some("-V") => (0, format!("docfit {}\n", env!("DOCFIT_VERSION"))),
         Some(other) => (
             2,
             format!(
@@ -45,10 +49,10 @@ mod tests {
     }
 
     #[test]
-    fn version_names_the_crate_version() {
+    fn version_says_the_stamped_version() {
         assert_eq!(
             answer(&["--version".into()]).1,
-            format!("docfit {}\n", env!("CARGO_PKG_VERSION"))
+            format!("docfit {}\n", env!("DOCFIT_VERSION"))
         );
     }
 }
