@@ -1,0 +1,12 @@
+# How factorium gates this repo (factorium SPEC.md §5). No [cut] yet: docfit#1 adds it with packaging/release.sh, as slimfit's.
+[gate]
+fast = "./gate.sh"
+fast_limit = 300
+slow = "./gate.sh"
+slow_limit = 300
+regenerated = [".slimfit/baseline.json"]
+
+[idle]
+tasks = "slimfit --version && truefit --version && slimfit next --all --sample 5 && truefit next --all"
+every = 86400
+limit = 1800
