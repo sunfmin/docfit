@@ -253,6 +253,37 @@ mod tests {
     }
 
     #[test]
+    fn prose_after_closed_inline_code_still_breaks() {
+        assert_eq!(
+            format("Run `a. b` now. Then.\n"),
+            "Run `a. b` now.\nThen.\n"
+        );
+    }
+
+    #[test]
+    fn a_shorter_run_inside_a_fence_does_not_close_it() {
+        let text = "~~~~\n~~~\nA. B.\n~~~~\nC. D.\n";
+        assert_eq!(format(text), "~~~~\n~~~\nA. B.\n~~~~\nC.\nD.\n");
+    }
+
+    #[test]
+    fn a_number_without_a_space_after_it_is_no_list_marker() {
+        assert_eq!(format("One. 2.0 works.\n"), "One.\n2.0 works.\n");
+    }
+
+    #[test]
+    fn a_sentence_is_never_broken_before_an_underline() {
+        for text in ["A. ===\n", "A. ---\n"] {
+            assert_eq!(format(text), text);
+        }
+    }
+
+    #[test]
+    fn a_line_led_by_a_link_is_prose() {
+        assert_eq!(format("[Link](x) one. Two.\n"), "[Link](x) one.\nTwo.\n");
+    }
+
+    #[test]
     fn a_second_run_changes_nothing() {
         let text =
             "---\na: b\n---\nOne. Two.  \n- A. B. 1. C.\r\nD。E\n\n```\nx. y\n```\n第一。 第二。\n";
