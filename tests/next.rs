@@ -318,10 +318,10 @@ fn must_read_bytes_is_the_agent_docs_total_and_its_note_the_total_at_the_baselin
     let dir = repo(&[
         (
             "docfit.toml",
-            "[documents]\n\"A.md\" = \"agent\"\n\"B.md\" = \"agent\"\n\"README.md\" = \"readme\"\n",
+            "[documents]\n\"docs/agents/*.md\" = \"agent\"\n\"README.md\" = \"readme\"\n",
         ),
-        ("A.md", &a),
-        ("B.md", &b),
+        ("docs/agents/a.md", &a),
+        ("docs/agents/b.md", &b),
         ("README.md", "# Readme\n"),
     ]);
     let commit = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm"];
@@ -358,7 +358,7 @@ fn must_read_bytes_is_the_agent_docs_total_and_its_note_the_total_at_the_baselin
             .stdout,
     )
     .unwrap();
-    std::fs::write(dir.path().join("A.md"), a + "\nGrown.\n").unwrap();
+    std::fs::write(dir.path().join("docs/agents/a.md"), a + "\nGrown.\n").unwrap();
     let (code, answer) = docfit(dir.path(), &["next", "--all"]);
     assert_eq!(code, 0, "{answer}");
     assert_eq!(answer["counts"]["must_read_bytes"], 158, "{answer}");
