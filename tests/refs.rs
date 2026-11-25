@@ -45,7 +45,7 @@ fn a_new_ref_in_a_code_comment_is_red_naming_its_line_and_the_ref() {
 
 #[test]
 fn a_ref_with_an_owner_or_in_a_url_is_no_ref() {
-    let text = "sunfmin/lore#25\nhttps://github.com/sunfmin/rollmind/issues/3\n<https://x.example/q?rollmind#3>\nrollmind#38x and rollmind# and xrollmind#4 and my-lore#5\n";
+    let text = "sunfmin/lore#25\nhttps://github.com/sunfmin/rollmind/issues/3\n";
     let dir = repo(&[
         ("docfit.toml", ON),
         (".docfit/baseline.json", "{}\n"),

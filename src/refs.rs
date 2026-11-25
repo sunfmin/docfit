@@ -39,14 +39,15 @@ pub(crate) fn find(text: &str, names: &[String]) -> Vec<Ref> {
             if digits == 0 || line[end..].starts_with(|c: char| c.is_alphanumeric() || c == '_') {
                 continue;
             }
-            let start = after(&line[..i], |c| !named(c));
+            let start = line[..i].trim_end_matches(named).len();
             if !names.iter().any(|name| *name == line[start..i]) || line[..start].ends_with('/') {
                 continue;
             }
-            let word = after(&line[..start], |c| {
-                c.is_whitespace() || "(<[\"'`".contains(c)
-            });
-            if !line[word..start].contains("://") {
+            let word = line[..start]
+                .rsplit(|c: char| c.is_whitespace() || "(<[\"'`".contains(c))
+                .next()
+                .unwrap_or("");
+            if !word.contains("://") {
                 out.push(Ref {
                     line: n + 1,
                     text: line[start..end].to_string(),
@@ -57,25 +58,21 @@ pub(crate) fn find(text: &str, names: &[String]) -> Vec<Ref> {
     out
 }
 
-/// Where in `text` the run after its last char that is `stop` starts.
-fn after(text: &str, stop: impl Fn(char) -> bool) -> usize {
-    text.char_indices()
-        .rev()
-        .find(|(_, c)| stop(*c))
-        .map_or(0, |(j, c)| j + c.len_utf8())
-}
-
 /// Each file with a local ref, with its refs in order.
 pub(crate) type Found = BTreeMap<String, Vec<Ref>>;
 
-/// The count `baseline` holds `file`'s refs at; 0 when it holds none.
-fn held(baseline: &Baseline, file: &str) -> usize {
-    match baseline.get(file) {
-        Some(Held::Over(h)) => h.local_refs,
-        Some(Held::Rehome(r)) => r.local_refs,
-        None => None,
+/// The count `held` holds its file's refs at; 0 when it holds none.
+fn count(held: &Held) -> usize {
+    match held {
+        Held::Over(h) => h.local_refs,
+        Held::Rehome(r) => r.local_refs,
     }
     .unwrap_or(0)
+}
+
+/// The count `baseline` holds `file`'s refs at; 0 when it holds none.
+fn held(baseline: &Baseline, file: &str) -> usize {
+    baseline.get(file).map_or(0, count)
 }
 
 /// `next` holding `file`'s refs at `count`, beside what else it holds it at.
@@ -116,10 +113,9 @@ pub(crate) fn check(found: &Found, baseline: Option<&Baseline>) -> Vec<Value> {
 /// added. With the check off (`found` `None`), at what `held` holds.
 pub(crate) fn ratchet(found: Option<&Found>, held: Option<&Baseline>, next: &mut Baseline) {
     let Some(found) = found else {
-        for file in held.iter().flat_map(|h| h.keys()) {
-            let count = held.map_or(0, |h| self::held(h, file));
-            if count > 0 {
-                hold(next, file, count);
+        for (file, held) in held.into_iter().flatten() {
+            if count(held) > 0 {
+                hold(next, file, count(held));
             }
         }
         return;
@@ -135,7 +131,7 @@ pub(crate) fn ratchet(found: Option<&Found>, held: Option<&Baseline>, next: &mut
 /// Whether `baseline` holds any file's refs: a repo whose baseline holds none
 /// has not adopted the check yet.
 pub(crate) fn adopted(baseline: &Baseline) -> bool {
-    baseline.keys().any(|f| held(baseline, f) > 0)
+    baseline.values().any(|h| count(h) > 0)
 }
 
 #[cfg(test)]
@@ -163,6 +159,7 @@ mod tests {
         for text in [
             "sunfmin/lore#25",
             "https://x.example/rollmind#3",
+            "https://github.com/sunfmin/rollmind/issues/3",
             "https://x.example/?q=rollmind#3",
             "xrollmind#4 my-lore#5 a.lore#6",
             "rollmind#38x rollmind#3_ rollmind# #12",

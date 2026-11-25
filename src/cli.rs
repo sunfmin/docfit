@@ -446,29 +446,6 @@ fn config(top: &Path) -> Result<Option<String>, Vec<Refusal>> {
     }
 }
 
-/// A repo read for `docfit check` and `docfit ratchet`.
-struct Registered {
-    top: PathBuf,
-    answer: Answer,
-    tracked: Vec<String>,
-    /// The local refs in its files; `None`: the check is off.
-    found: Option<Found>,
-}
-
-/// The repo's top, its documents registered, the paths git tracks, and the
-/// local refs in them.
-fn registered(repo: Option<PathBuf>) -> Result<Registered, Vec<Refusal>> {
-    let top = top(repo)?;
-    let (answer, tracked, config) = registered_at(&top)?;
-    let found = found(&top, &config, &tracked);
-    Ok(Registered {
-        top,
-        answer,
-        tracked,
-        found,
-    })
-}
-
 /// The local refs in each text file of `tracked` that `config` does not
 /// ignore; `None` when it lists no `local_issue_refs`. A file that cannot be
 /// read, or holds a NUL byte in its first 8000 (binary), is not read.
@@ -621,12 +598,9 @@ fn baseline(top: &Path) -> Result<Option<Baseline>, Vec<Refusal>> {
 }
 
 fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
-    let Registered {
-        top,
-        answer,
-        tracked,
-        found,
-    } = registered(repo)?;
+    let top = top(repo)?;
+    let (answer, tracked, config) = registered_at(&top)?;
+    let found = found(&top, &config, &tracked);
     let texts = read(&top, &answer)?;
     let docs = measured(&texts, &Tree::new(&tracked));
     let strays = strays(&top, &answer)?;
@@ -685,16 +659,14 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let found = found.as_ref();
     let held = baseline(&top)?;
     let adopted = held.is_none();
-    let next = match &held {
-        // A baseline holding no refs has not adopted the check: hold them now.
-        Some(held) if !refs::adopted(held) => {
-            let mut next = held.clone();
-            refs::ratchet(found, None, &mut next);
-            next
-        }
+    let mut next = match &held {
         Some(held) => held.clone(),
-        None => ratcheted(&docs, &strays, found, None),
+        None => budget::ratchet(&docs, &strays, None),
     };
+    // A baseline holding no refs has not adopted the check: hold them now.
+    if !refs::adopted(&next) {
+        refs::ratchet(found, None, &mut next);
+    }
     let wrote_baseline = held.as_ref() != Some(&next);
     if wrote_baseline {
         write(&top.join(BASELINE), &(pretty(&json!(next)) + "\n"))?;
@@ -737,12 +709,9 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
 }
 
 fn ratchet(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
-    let Registered {
-        top,
-        answer,
-        tracked,
-        found,
-    } = registered(repo)?;
+    let top = top(repo)?;
+    let (answer, tracked, config) = registered_at(&top)?;
+    let found = found(&top, &config, &tracked);
     let texts = read(&top, &answer)?;
     let docs = measured(&texts, &Tree::new(&tracked));
     let held = baseline(&top)?;
