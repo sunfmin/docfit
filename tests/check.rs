@@ -1105,3 +1105,18 @@ fn init_refuses_an_ignore_it_cannot_add_a_glob_to_and_writes_nothing() {
     );
     assert!(!dir.path().join(".docfit").exists());
 }
+
+#[test]
+fn init_writes_ignore_before_a_first_table_on_the_first_line() {
+    let dir = repo(&[
+        ("docfit.toml", README_ONLY),
+        ("README.md", "r\n"),
+        ("src/help.md", "h\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap(),
+        format!("ignore = [\"src/**\"]\n\n{README_ONLY}")
+    );
+}

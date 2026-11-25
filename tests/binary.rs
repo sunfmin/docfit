@@ -43,6 +43,19 @@ fn help_is_the_manual() {
     assert!(out.contains("## Budgets"), "{out}");
     let (_, check) = docfit(&["check", "--help"]);
     assert!(check.contains("one of `.md`, `.toml`, `.json`,"), "{check}");
+    assert!(
+        out.contains("| what the product shows or publishes | none; an entry may set one | 600 |"),
+        "{out}"
+    );
+    assert!(
+        check.contains("Every repo ignores `.slimfit/**`, `.truefit/**`, the fits' own records"),
+        "{check}"
+    );
+    let (_, init) = docfit(&["init", "--help"]);
+    assert!(
+        init.contains("with one of `src`, `tests`, `test`, `fixtures`, `testdata`, `__fixtures__` as a directory"),
+        "{init}"
+    );
 }
 
 #[test]
