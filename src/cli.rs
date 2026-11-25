@@ -10,7 +10,7 @@ use crate::pointers::{self, Tree};
 use crate::refs::{self, Found};
 use crate::repo;
 use crate::restates::{self, Index, Restates, Text};
-use crate::tasks::{self, Task};
+use crate::tasks;
 use agent_help::{Help, Topic};
 use clap::{FromArgMatches, Parser, Subcommand};
 use serde_json::{Value, json};
@@ -877,41 +877,47 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
     };
     let counted = seen.read.counted(&seen.answer);
     let [rehome, over_budget] = tasks::debt(&docs, &strays, &held);
+    // Each kind in the order `docfit next` answers it: its name, its steps,
+    // what the baseline holds its file at until it is done, and its debt. The
+    // rehome steps start from `docfit where`, so its answer is evidence.
+    let (rehome_steps, refs) = (RehomeTopic::MARKDOWN, counted.refs);
     let debt = [
-        rehome,
-        over_budget,
+        ("rehome", rehome_steps, "to rehome", rehome),
+        ("over-budget", rehome_steps, "over its budget", over_budget),
         (
-            Task::LocalRefs,
-            counted.refs.map_or_else(Vec::new, |f| refs::debt(f, &held)),
+            "local-refs",
+            LocalRefsTopic::MARKDOWN,
+            "at a count of local refs",
+            refs.map_or_else(Vec::new, |f| refs::debt(f, &held)),
         ),
-        (Task::Restates, restates::debt(&counted.restated, &held)),
         (
-            Task::Measurement,
+            "restates",
+            RestatesTopic::MARKDOWN,
+            "at a count of restatements",
+            restates::debt(&counted.restated, &held),
+        ),
+        (
+            "measurement",
+            MeasurementTopic::MARKDOWN,
+            "at a count of measurements",
             measurements::debt(&counted.measured, &held),
         ),
     ];
     let (mut tasks, mut counts) = (Vec::new(), serde_json::Map::new());
-    for (task, debts) in debt {
-        counts.insert(task.name().to_string(), json!(debts.len()));
-        // The rehome steps start from `docfit where`, so its answer is evidence.
-        let (steps, place) = match task {
-            Task::Rehome | Task::OverBudget => (RehomeTopic::MARKDOWN, true),
-            Task::LocalRefs => (LocalRefsTopic::MARKDOWN, false),
-            Task::Restates => (RestatesTopic::MARKDOWN, false),
-            Task::Measurement => (MeasurementTopic::MARKDOWN, false),
-        };
+    for (kind, steps, holds, debts) in debt {
+        counts.insert(kind.to_string(), json!(debts.len()));
         for debt in debts {
             let mut evidence = debt.evidence;
-            if place {
+            if steps == rehome_steps {
                 let text = tracked_text(&top, debt.file).map_err(|r| vec![r])?;
                 evidence["where"] = seen.place(debt.file, &text);
             }
             tasks.push(json!({
-                "kind": task.name(), "summary": debt.summary, "files": [debt.file],
+                "kind": kind, "summary": debt.summary, "files": [debt.file],
                 "steps": steps,
                 "accept": format!(
-                    "`docfit ratchet`, then `docfit check` exits {EXIT_OK} and {BASELINE} no longer holds {}",
-                    task.held(debt.file)
+                    "`docfit ratchet`, then `docfit check` exits {EXIT_OK} and {BASELINE} no longer holds `{}` {holds}",
+                    debt.file
                 ),
                 "evidence": evidence,
             }));
