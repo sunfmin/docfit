@@ -140,10 +140,7 @@ pub(crate) fn run(args: impl IntoIterator<Item = std::ffi::OsString>) -> (String
 }
 
 fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
-    let start = repo
-        .map_or_else(std::env::current_dir, Ok)
-        .map_err(|e| vec![refusal(&e.to_string(), "run it in a repo")])?;
-    let top = repo::top(&start)?;
+    let top = repo::top(&repo.unwrap_or_else(|| PathBuf::from(".")))?;
     let config = std::fs::read_to_string(top.join(CONFIG)).map_err(|e| {
         vec![refusal(
             &format!("cannot read {CONFIG} at the repo's top: {e}"),

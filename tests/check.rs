@@ -57,13 +57,17 @@ fn an_unregistered_markdown_file_is_red_with_the_line_that_registers_it() {
         ("README.md", "# r\n"),
         ("docs/agents/tracker.md", "x\n"),
         ("notes.md", "x\n"),
+        ("docs/adr/0001-one.md", "x\n"),
         ("src/main.rs", "fn main() {}\n"),
     ]);
     std::fs::write(dir.path().join("untracked.md"), "x\n").unwrap();
     let (code, answer) = check(dir.path());
     assert_eq!(code, 1, "{answer}");
     let faults = answer["faults"].as_array().unwrap();
-    assert_eq!(faults.len(), 2, "{answer}");
+    assert_eq!(faults.len(), 3, "{answer}");
+    assert_eq!(faults[0]["file"], "docs/adr/0001-one.md");
+    assert_eq!(faults[0]["kinds"], serde_json::json!(["adr"]));
+    let faults = &faults[1..];
     assert_eq!(faults[0]["file"], "docs/agents/tracker.md");
     assert_eq!(faults[0]["fault"], "unregistered");
     assert_eq!(faults[0]["kinds"], serde_json::json!(["agent"]));
@@ -83,7 +87,7 @@ fn an_unregistered_markdown_file_is_red_with_the_line_that_registers_it() {
             .contains("`\"notes.md\" = \"<kind>\"`"),
         "{answer}"
     );
-    assert_eq!(answer["next"], faults[0]["fix"]);
+    assert_eq!(answer["next"], answer["faults"][0]["fix"]);
 }
 
 #[test]
@@ -151,5 +155,40 @@ fn a_repo_without_docfit_toml_is_refused_with_how_to_start_one() {
             .unwrap()
             .contains("[documents]"),
         "{answer}"
+    );
+}
+
+#[test]
+fn a_docfit_toml_docfit_cannot_read_is_refused_with_its_fix() {
+    for (toml, fix) in [
+        ("[documents\n", "fix docfit.toml"),
+        ("[other]\n", "add a `[documents]` table to docfit.toml"),
+        (
+            "[documents]\n\"docs/[a.md\" = \"agent\"\n",
+            "fix `docs/[a.md` in docfit.toml",
+        ),
+        (
+            "[documents]\n\"README.md\" = 1\n",
+            "give `README.md` one of the kinds",
+        ),
+    ] {
+        let dir = repo(&[("docfit.toml", toml), ("README.md", "r\n")]);
+        let (code, answer) = check(dir.path());
+        assert_eq!(code, 2, "{toml}: {answer}");
+        assert!(
+            answer["error"][0]["fix"].as_str().unwrap().starts_with(fix),
+            "{toml}: {answer}"
+        );
+    }
+}
+
+#[test]
+fn outside_a_git_repository_it_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 2, "{answer}");
+    assert_eq!(
+        answer["error"][0]["fix"],
+        "run it in a git repository, or give one with `--repo`"
     );
 }
