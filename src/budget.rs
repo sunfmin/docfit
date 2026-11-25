@@ -52,6 +52,9 @@ pub(crate) struct Hold {
     pub(crate) line: Option<usize>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub(crate) pointers: BTreeSet<String>,
+    /// The local tracker refs it is held at (`refs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) local_refs: Option<usize>,
 }
 
 /// What the baseline holds a file at: a document over its budget, or a file
@@ -69,6 +72,9 @@ pub(crate) enum Held {
 #[serde(deny_unknown_fields)]
 pub(crate) struct Rehome {
     pub(crate) rehome: usize,
+    /// The local tracker refs it is held at (`refs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) local_refs: Option<usize>,
 }
 
 /// The baseline: each file it holds, at the size it may not grow past.
@@ -166,7 +172,7 @@ pub(crate) fn check(
     }
     for stray in strays {
         match baseline.and_then(|b| b.get(stray.file)) {
-            Some(Held::Rehome(Rehome { rehome })) => {
+            Some(Held::Rehome(Rehome { rehome, .. })) => {
                 if stray.bytes > *rehome {
                     faults.push(json!({
                         "file": stray.file, "fault": "rehome_grew", "size": stray.bytes, "limit": rehome,
@@ -201,11 +207,17 @@ pub(crate) fn ratchet(
     for stray in strays {
         let held = match baseline.map(|b| b.get(stray.file)) {
             None => Some(stray.bytes),
-            Some(Some(Held::Rehome(Rehome { rehome }))) => Some(stray.bytes.min(*rehome)),
+            Some(Some(Held::Rehome(Rehome { rehome, .. }))) => Some(stray.bytes.min(*rehome)),
             Some(_) => None,
         };
         if let Some(rehome) = held {
-            next.insert(stray.file.to_string(), Held::Rehome(Rehome { rehome }));
+            next.insert(
+                stray.file.to_string(),
+                Held::Rehome(Rehome {
+                    rehome,
+                    local_refs: None,
+                }),
+            );
         }
     }
     for doc in docs {
@@ -232,6 +244,7 @@ pub(crate) fn ratchet(
             ),
             line: None,
             pointers,
+            local_refs: None,
         };
         if hold != Hold::default() {
             next.insert(doc.file.to_string(), Held::Over(hold));

@@ -4,6 +4,7 @@
 
 use crate::budget::Size;
 use crate::kind::Kind;
+use crate::refs;
 use globset::{GlobBuilder, GlobMatcher};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -47,12 +48,14 @@ pub(crate) struct Entry {
     paragraph: Option<usize>,
 }
 
-/// `docfit.toml`, read: its entries, the globs of its string catalogs, and
-/// the globs of what it ignores, [`IGNORED`] among them.
+/// `docfit.toml`, read: its entries, the globs of its string catalogs, the
+/// globs of what it ignores, [`IGNORED`] among them, and the names whose
+/// `<name>#<digits>` cites the local tracker (`None`: the check is off).
 pub(crate) struct Config {
     pub(crate) entries: Vec<Entry>,
     pub(crate) catalogs: Vec<GlobMatcher>,
     ignore: Vec<GlobMatcher>,
+    pub(crate) local_refs: Option<Vec<String>>,
 }
 
 impl Config {
@@ -61,11 +64,14 @@ impl Config {
         self.ignore.iter().any(|g| g.is_match(file))
     }
 
+    /// The files of `files` it does not ignore.
+    pub(crate) fn kept<'a>(&'a self, files: &'a [String]) -> impl Iterator<Item = &'a String> {
+        files.iter().filter(|f| !self.ignores(f))
+    }
+
     /// The Markdown files of `files` it does not ignore.
     fn markdown<'a>(&'a self, files: &'a [String]) -> impl Iterator<Item = &'a String> {
-        files
-            .iter()
-            .filter(|f| f.ends_with(".md") && !self.ignores(f))
+        self.kept(files).filter(|f| f.ends_with(".md"))
     }
 
     /// Whether an entry registers `file`.
@@ -139,6 +145,23 @@ pub(crate) fn config(config: &str) -> Result<Config, Vec<Refusal>> {
             &mut refusals,
         ))
         .collect();
+    let local_refs = table.get(refs::KEY).and_then(|value| {
+        let names = value.clone().try_into::<Vec<String>>().ok();
+        let names = names.filter(|n| {
+            n.iter()
+                .all(|name| !name.is_empty() && name.chars().all(refs::named))
+        });
+        if names.is_none() {
+            refusals.push(Refusal {
+                fault: format!("`{}` = `{value}` is not a list of names", refs::KEY),
+                fix: format!(
+                    "write `{} = [\"<name>\", ...]` in {CONFIG}, before its first table: each a name whose `<name>#<digits>` cites the local tracker, of letters, digits, `-`, `_` and `.`",
+                    refs::KEY
+                ),
+            });
+        }
+        names
+    });
     for (glob, value) in documents {
         let (kind, bytes, paragraph) = match value.clone().try_into() {
             Ok(Entered::Kind(name)) => (name, None, None),
@@ -177,6 +200,7 @@ pub(crate) fn config(config: &str) -> Result<Config, Vec<Refusal>> {
             entries,
             catalogs,
             ignore,
+            local_refs,
         })
     } else {
         Err(refusals)
