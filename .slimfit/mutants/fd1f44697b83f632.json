@@ -1,0 +1,21 @@
+{
+  "tree": "edf4c11b1582b12bebdc60f3e2097e8bf7b29614+d1fba762150c532c",
+  "picker": "codex:01a2138d-238b-7720-b4af-f0c53cec9457:default",
+  "author": "claude-code:68c66e5c-9e43-5827-a010-a33d8a026e80:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/hot.rs:46:44: replace > with >= in read",
+        "why": "This would accept a share of exactly 0.0, a boundary the configuration tests never exercise.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/hot.rs:46:61: replace < with <= in read",
+        "why": "The invalid-share tests use values above 1, so accepting exactly 1.0 could go undetected.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}
