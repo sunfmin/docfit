@@ -2,4 +2,3 @@
 [documents]
 "README.md" = "readme"
 "CLAUDE.md" = "agent"
-"docs/agents/*.md" = "agent"
