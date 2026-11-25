@@ -472,3 +472,221 @@ fn at_its_budget_exactly_is_within_it() {
         serde_json::json!({ "README.md": { "line": 7 } })
     );
 }
+
+#[test]
+fn init_registers_each_file_by_its_place_and_holds_the_rest_to_rehome_green_that_day() {
+    let big = "x\n".repeat(2500);
+    let dir = repo(&[
+        ("README.md", &big),
+        ("CLAUDE.md", "c\n"),
+        ("AGENTS.md", "a\n"),
+        ("docs/agents/tracker.md", "t\n"),
+        ("docs/adr/0001-one.md", "d\n"),
+        ("GLOSSARY.md", "g\n"),
+        ("SPEC.md", "spec\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), "init");
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(
+        answer["registered"],
+        serde_json::json!({
+            "AGENTS.md": "agent", "CLAUDE.md": "agent", "GLOSSARY.md": "glossary",
+            "README.md": "readme", "docs/adr/0001-one.md": "adr", "docs/agents/tracker.md": "agent"
+        })
+    );
+    let rehome = answer["rehome"].as_array().unwrap();
+    assert_eq!(rehome.len(), 1, "{answer}");
+    assert_eq!(rehome[0]["file"], "SPEC.md");
+    assert_eq!(rehome[0]["size"], 5);
+    assert_eq!(
+        rehome[0]["kinds"],
+        serde_json::json!(["readme", "agent", "adr", "glossary", "design-note"])
+    );
+    assert_eq!(answer["faults"], serde_json::json!([]), "{answer}");
+    assert_eq!(answer["changed"], true);
+    assert_eq!(
+        baseline(dir.path()),
+        serde_json::json!({ "README.md": { "bytes": 5000 }, "SPEC.md": { "rehome": 5 } })
+    );
+    assert_eq!(answer["baseline"], baseline(dir.path()));
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 0, "{checked}");
+    assert_eq!(checked["faults"], serde_json::json!([]), "{checked}");
+
+    let toml = std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap();
+    let (code, again) = docfit(dir.path(), "init");
+    assert_eq!(code, 0, "{again}");
+    assert_eq!(again["registered"], serde_json::json!({}), "{again}");
+    assert_eq!(again["rehome"], serde_json::json!([]), "{again}");
+    assert_eq!(again["changed"], false, "{again}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap(),
+        toml
+    );
+
+    std::fs::write(dir.path().join("SPEC.md"), "spec!\n").unwrap();
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 1, "{checked}");
+    assert_eq!(checked["faults"][0]["file"], "SPEC.md");
+    assert_eq!(checked["faults"][0]["fault"], "rehome_grew");
+    assert_eq!(checked["faults"][0]["size"], 6);
+    assert_eq!(checked["faults"][0]["limit"], 5);
+    assert_eq!(
+        checked["faults"][0]["fix"],
+        "cut `SPEC.md` back to at most 5 bytes (it is 6), the size .docfit/baseline.json holds it at to rehome: move its content to the documents whose kinds it holds, or register it under a kind"
+    );
+
+    std::fs::write(dir.path().join("notes.md"), "n\n").unwrap();
+    std::fs::write(dir.path().join("SPEC.md"), "sp\n").unwrap();
+    git(dir.path(), &["add", "-A"]);
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 1, "{checked}");
+    assert_eq!(checked["faults"].as_array().unwrap().len(), 1, "{checked}");
+    assert_eq!(checked["faults"][0]["fault"], "unregistered");
+    assert_eq!(checked["faults"][0]["file"], "notes.md");
+    docfit(dir.path(), "ratchet");
+    assert_eq!(
+        baseline(dir.path())["SPEC.md"],
+        serde_json::json!({ "rehome": 3 })
+    );
+    assert_eq!(baseline(dir.path()).get("notes.md"), None);
+
+    git(dir.path(), &["rm", "-qf", "SPEC.md", "notes.md"]);
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 0, "{checked}");
+    assert!(
+        checked["next"]
+            .as_str()
+            .unwrap()
+            .starts_with("run `docfit ratchet`"),
+        "{checked}"
+    );
+    let (_, ratcheted) = docfit(dir.path(), "ratchet");
+    assert_eq!(ratcheted["changed"], true);
+    assert_eq!(
+        baseline(dir.path()),
+        serde_json::json!({ "README.md": { "bytes": 5000 } })
+    );
+}
+
+#[test]
+fn init_keeps_what_is_registered_and_adds_only_what_is_not() {
+    let toml = "# ours\n[documents]\n\"README.md\" = { kind = \"readme\", bytes = 100 }\n\n[other]\nx = 1\n";
+    let big = "y\n".repeat(1500);
+    let dir = repo(&[
+        ("docfit.toml", toml),
+        ("README.md", "r\n"),
+        ("CLAUDE.md", &big),
+    ]);
+    let (code, answer) = docfit(dir.path(), "init");
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(
+        answer["registered"],
+        serde_json::json!({ "CLAUDE.md": "agent" })
+    );
+    assert_eq!(answer["rehome"], serde_json::json!([]));
+    assert_eq!(answer["changed"], true);
+    let written = std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap();
+    assert_eq!(
+        written,
+        "# ours\n[documents]\n\"README.md\" = { kind = \"readme\", bytes = 100 }\n\"CLAUDE.md\" = \"agent\"\n\n[other]\nx = 1\n"
+    );
+    assert_eq!(
+        baseline(dir.path()),
+        serde_json::json!({ "CLAUDE.md": { "bytes": 3000 } })
+    );
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 0, "{checked}");
+    assert_eq!(checked["documents"]["CLAUDE.md"], "agent");
+}
+
+#[test]
+fn init_refuses_a_docfit_toml_it_cannot_read_and_writes_nothing() {
+    let dir = repo(&[("docfit.toml", "[documents\n"), ("README.md", "r\n")]);
+    let (code, answer) = docfit(dir.path(), "init");
+    assert_eq!(code, 2, "{answer}");
+    assert!(
+        answer["error"][0]["fault"]
+            .as_str()
+            .unwrap()
+            .contains("not TOML")
+    );
+    assert!(!dir.path().join(".docfit").exists());
+}
+
+#[test]
+fn init_refuses_a_documents_table_it_cannot_add_a_line_to() {
+    let toml = "documents = { \"README.md\" = \"readme\" }\n";
+    let dir = repo(&[
+        ("docfit.toml", toml),
+        ("README.md", "r\n"),
+        ("CLAUDE.md", "c\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), "init");
+    assert_eq!(code, 2, "{answer}");
+    assert_eq!(
+        answer["error"][0]["fix"],
+        "write `documents` in docfit.toml as a `[documents]` table, a line per glob"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap(),
+        toml
+    );
+}
+
+#[test]
+fn a_tracked_file_gone_from_the_working_tree_is_refused_with_its_fix() {
+    let dir = repo(&[
+        ("docfit.toml", README_ONLY),
+        ("README.md", "r\n"),
+        ("SPEC.md", "s\n"),
+    ]);
+    std::fs::remove_file(dir.path().join("SPEC.md")).unwrap();
+    for command in ["check", "ratchet", "init"] {
+        let (code, answer) = docfit(dir.path(), command);
+        assert_eq!(code, 2, "{command}: {answer}");
+        assert_eq!(
+            answer["error"][0]["fix"],
+            "restore `SPEC.md`, or `git rm` it"
+        );
+    }
+}
+
+#[test]
+fn init_on_a_repo_with_a_baseline_leaves_it_and_answers_what_check_would() {
+    let dir = repo(&[
+        ("docfit.toml", "[other]\nx = 1"),
+        (".docfit/baseline.json", "{}\n"),
+        ("README.md", "r\n"),
+        ("notes.md", "n\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), "init");
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(
+        answer["registered"],
+        serde_json::json!({ "README.md": "readme" })
+    );
+    assert_eq!(answer["rehome"], serde_json::json!([]));
+    assert_eq!(answer["faults"][0]["fault"], "unregistered", "{answer}");
+    assert_eq!(answer["faults"][0]["file"], "notes.md");
+    assert_eq!(answer["next"], answer["faults"][0]["fix"]);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap(),
+        "[other]\nx = 1\n\n[documents]\n\"README.md\" = \"readme\"\n"
+    );
+    assert_eq!(baseline(dir.path()), serde_json::json!({}));
+}
+
+#[test]
+fn a_docfit_toml_it_cannot_read_is_refused_with_its_fix() {
+    let dir = repo(&[("README.md", "r\n")]);
+    std::fs::create_dir(dir.path().join("docfit.toml")).unwrap();
+    for command in ["check", "init"] {
+        let (code, answer) = docfit(dir.path(), command);
+        assert_eq!(code, 2, "{command}: {answer}");
+        assert_eq!(
+            answer["error"][0]["fix"],
+            "make docfit.toml readable UTF-8 text, or restore it from git"
+        );
+    }
+}

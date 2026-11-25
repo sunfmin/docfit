@@ -184,3 +184,64 @@ pub(crate) fn check(entries: &[Entry], files: &[String]) -> Answer {
 fn fault(file: &str, fault: &str, kinds: &[Kind], fix: String) -> Value {
     json!({ "file": file, "fault": fault, "kinds": kinds.iter().map(|k| k.name()).collect::<Vec<_>>(), "fix": fix })
 }
+
+/// The `docfit.toml` a repo starts with, before `docfit init` adds its lines.
+const STARTED: &str =
+    "# This repo's documents, each under its kind (`docfit check --help`).\n[documents]\n";
+
+/// `config` (`None`: the repo has no `docfit.toml` yet) with a line added for
+/// each of `files` that is not registered and whose place says its kind;
+/// with each file added, its kind. Every line already there is kept as it is,
+/// so on a config that registers them all it answers `config` itself.
+pub(crate) fn adopt(
+    config: Option<&str>,
+    files: &[String],
+) -> Result<(String, BTreeMap<String, Kind>), Vec<Refusal>> {
+    let mut text = config.unwrap_or(STARTED).to_string();
+    if text
+        .parse::<toml::Table>()
+        .is_ok_and(|t| !t.contains_key(TABLE))
+    {
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(&format!("\n[{TABLE}]\n"));
+    }
+    let answer = check(&entries(&text)?, files);
+    let added: BTreeMap<String, Kind> = answer
+        .faults
+        .iter()
+        .filter(|f| f["fault"] == "unregistered")
+        .filter_map(|f| {
+            let file = f["file"].as_str()?;
+            Some((file.to_string(), Kind::conventional(file)?))
+        })
+        .collect();
+    if added.is_empty() {
+        return Ok((text, added));
+    }
+    let mut lines: Vec<&str> = text.lines().collect();
+    let header = format!("[{TABLE}]");
+    let Some(at) = lines
+        .iter()
+        .position(|l| l.split('#').next().unwrap_or("").trim() == header)
+    else {
+        return Err(vec![Refusal {
+            fault: format!("{CONFIG} has `{TABLE}` but not as a `{header}` table header"),
+            fix: format!("write `{TABLE}` in {CONFIG} as a `{header}` table, a line per glob"),
+        }]);
+    };
+    let mut end = lines[at + 1..]
+        .iter()
+        .position(|l| l.trim_start().starts_with('['))
+        .map_or(lines.len(), |n| at + 1 + n);
+    while end > at + 1 && lines[end - 1].trim().is_empty() {
+        end -= 1;
+    }
+    let new: Vec<String> = added
+        .iter()
+        .map(|(file, kind)| format!("{} = \"{}\"", toml::Value::from(file.as_str()), kind.name()))
+        .collect();
+    lines.splice(end..end, new.iter().map(String::as_str));
+    Ok((lines.join("\n") + "\n", added))
+}
