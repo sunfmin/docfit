@@ -549,23 +549,6 @@ struct Counted<'a> {
 }
 
 impl Counted<'_> {
-    /// The faults of each count over what `baseline` holds.
-    fn faults(&self, baseline: Option<&Baseline>) -> Vec<Value> {
-        let mut faults = self
-            .refs
-            .map_or_else(Vec::new, |f| refs::check(f, baseline));
-        faults.extend(restates::check(&self.restated, baseline));
-        faults.extend(measurements::check(&self.measured, baseline));
-        faults
-    }
-
-    /// `next` holding each count as `held` ratchets to.
-    fn ratchet(&self, held: Option<&Baseline>, next: &mut Baseline) {
-        refs::ratchet(self.refs, held, next);
-        restates::ratchet(&self.restated, held, next);
-        measurements::ratchet(&self.measured, held, next);
-    }
-
     /// `next` holding each count it holds none of yet: `docfit init`'s
     /// adoption.
     fn adopt(&self, next: &mut Baseline) {
@@ -586,7 +569,9 @@ fn ratcheted(
     held: Option<&Baseline>,
 ) -> Baseline {
     let mut next = budget::ratchet(docs, strays, held);
-    counted.ratchet(held, &mut next);
+    refs::ratchet(counted.refs, held, &mut next);
+    restates::ratchet(&counted.restated, held, &mut next);
+    measurements::ratchet(&counted.measured, held, &mut next);
     next
 }
 
@@ -686,7 +671,13 @@ fn faults(
         .cloned()
         .collect();
     faults.extend(budget::check(docs, strays, baseline));
-    faults.extend(counted.faults(baseline));
+    faults.extend(
+        counted
+            .refs
+            .map_or_else(Vec::new, |f| refs::check(f, baseline)),
+    );
+    faults.extend(restates::check(&counted.restated, baseline));
+    faults.extend(measurements::check(&counted.measured, baseline));
     faults.sort_by(|a, b| a["file"].as_str().cmp(&b["file"].as_str()));
     faults
 }

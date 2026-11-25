@@ -5,7 +5,7 @@
 //! what [`find`] finds, and `docfit check` counts it: one detector. Pure: the
 //! texts, the catalogs and the baseline arrive as arguments.
 
-use crate::budget::{Baseline, Held, Hold};
+use crate::budget::{self, Baseline, Slot};
 use crate::paragraph::{self, Paragraph};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
@@ -217,46 +217,19 @@ impl Measure {
     }
 
     /// The field of a hold that holds it.
-    fn slot(self, hold: &mut Hold) -> &mut Option<usize> {
+    fn slot(self) -> Slot {
         match self {
-            Measure::Strings => &mut hold.strings,
-            Measure::Copies => &mut hold.copies,
+            Measure::Strings => |h| &mut h.strings,
+            Measure::Copies => |h| &mut h.copies,
         }
     }
 
-    /// The count `baseline` holds `file` at; 0 when it holds none.
-    fn held(self, baseline: &Baseline, file: &str) -> usize {
-        match baseline.get(file) {
-            Some(Held::Over(h)) => match self {
-                Measure::Strings => h.strings,
-                Measure::Copies => h.copies,
-            }
-            .unwrap_or(0),
-            _ => 0,
-        }
-    }
-
-    /// `next` holding each document of `found` at its count, as [`ratchet`]
-    /// says, beside what else it holds it at.
-    fn ratchet(
+    /// Each document of `found`, with its count now.
+    fn counts<'a>(
         self,
-        found: &BTreeMap<&str, Restates>,
-        held: Option<&Baseline>,
-        next: &mut Baseline,
-    ) {
-        for (file, restates) in found {
-            let now = self.of(restates).len();
-            let count = held.map_or(now, |h| self.held(h, file).min(now));
-            if count == 0 {
-                continue;
-            }
-            let entry = next
-                .entry(file.to_string())
-                .or_insert_with(|| Held::Over(Hold::default()));
-            // A document is never a file to rehome, which no kind registers.
-            let Held::Over(h) = entry else { continue };
-            *self.slot(h) = Some(count);
-        }
+        found: &'a BTreeMap<&str, Restates>,
+    ) -> impl Iterator<Item = (&'a str, usize)> {
+        found.iter().map(move |(f, r)| (*f, self.of(r).len()))
     }
 }
 
@@ -267,7 +240,7 @@ pub(crate) fn check(found: &BTreeMap<&str, Restates>, baseline: Option<&Baseline
     for (file, restates) in found {
         for measure in Measure::ALL {
             let all = measure.of(restates);
-            let limit = baseline.map_or(0, |b| measure.held(b, file));
+            let limit = baseline.map_or(0, |b| budget::held(b, file, measure.slot()));
             let Some(first) = all.get(limit) else {
                 continue;
             };
@@ -282,16 +255,14 @@ pub(crate) fn check(found: &BTreeMap<&str, Restates>, baseline: Option<&Baseline
 }
 
 /// `next` (the baseline the budgets ratchet to) holding each document's
-/// counts: with no baseline yet (`held` `None`), at its count now; after
-/// that, at the smaller of what `held` holds and its count now, dropped at
-/// 0, and never added.
+/// counts, shrink-only ([`budget::ratchet_counts`]).
 pub(crate) fn ratchet(
     found: &BTreeMap<&str, Restates>,
     held: Option<&Baseline>,
     next: &mut Baseline,
 ) {
     for measure in Measure::ALL {
-        measure.ratchet(found, held, next);
+        budget::ratchet_counts(measure.counts(found), measure.slot(), held, next);
     }
 }
 
@@ -300,9 +271,7 @@ pub(crate) fn ratchet(
 /// already adopted as it is.
 pub(crate) fn adopt(found: &BTreeMap<&str, Restates>, next: &mut Baseline) {
     for measure in Measure::ALL {
-        if !next.keys().any(|f| measure.held(next, f) > 0) {
-            measure.ratchet(found, None, next);
-        }
+        budget::adopt_counts(measure.counts(found), measure.slot(), next);
     }
 }
 
