@@ -421,3 +421,26 @@ fn a_baseline_or_document_it_cannot_read_is_refused() {
         "restore `README.md` as UTF-8 text, or `git rm` it"
     );
 }
+
+#[test]
+fn a_baseline_it_cannot_read_or_write_is_refused() {
+    let dir = repo(&[("docfit.toml", README_ONLY), ("README.md", "r\n")]);
+    std::fs::write(dir.path().join(".docfit"), "").unwrap();
+    let (code, answer) = docfit(dir.path(), "ratchet");
+    assert_eq!(code, 2, "{answer}");
+    assert!(
+        answer["error"][0]["fix"]
+            .as_str()
+            .unwrap()
+            .ends_with("writable, then run it again"),
+        "{answer}"
+    );
+    std::fs::remove_file(dir.path().join(".docfit")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".docfit/baseline.json")).unwrap();
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 2, "{answer}");
+    assert_eq!(
+        answer["error"][0]["fix"],
+        "make .docfit/baseline.json readable, or restore it from git"
+    );
+}
