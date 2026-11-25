@@ -24,7 +24,7 @@ pub(crate) const EXIT_ERROR: i32 = 2;
 ///
 /// A CLI for AI coding agents, beside slimfit (code size and tests) and truefit (ties to the real system). Run `docfit <command> --help` before a command's first run.
 ///
-/// A repo declares its documents in `docfit.toml`, at its top: each Markdown file git tracks is registered by a glob under one kind, and a kind says who reads the file and what it holds, nothing else. The kinds are fixed in docfit:
+/// A repo declares its documents in `docfit.toml`, at its top: each Markdown file git tracks, unless it ignores it (see `docfit check --help`), is registered by a glob under one kind, and a kind says who reads the file and what it holds, nothing else. The kinds are fixed in docfit:
 ///
 /// {const:KINDS}
 ///
@@ -74,7 +74,13 @@ enum Cmd {
     /// "docs/adr/*.md" = { kind = "adr", paragraph = 400 }
     /// ```
     ///
-    /// In a glob, `*` and `?` stay within one directory and `**` crosses directories, as in a `.gitignore`. A measure no matching entry sets is the kind's default; where several set it, the smallest holds.
+    /// In a glob, `*` and `?` stay within one directory and `**` crosses directories, as in a `.gitignore`. A measure no matching entry sets is the kind's default; where several set it, the smallest holds. A kind with no default size (`product`) bounds a document's size only where an entry sets `bytes`.
+    ///
+    /// Markdown that is not a document, such as help a program embeds from `src/` or a test's fixtures, is code or data: `docfit.toml` ignores it by glob, in a list before its first table. A path an `ignore` glob matches is neither a document nor a file to rehome, whatever `[documents]` says: no check reads it, and the baseline holds nothing for it. Every repo ignores {const:IGNORED}, the fits' own records; its list adds to those:
+    ///
+    /// ```toml
+    /// ignore = ["src/**", "tests/fixtures/**"]
+    /// ```
     ///
     /// The baseline maps a document to the measures it is held at over its budget and the pointers it is held at broken, and a file registered under no kind to the bytes it is held at to rehome, as `docfit ratchet` writes it: `{"README.md": {"bytes": 65536, "paragraph": 18000, "pointers": ["docs/old.md"]}, "SPEC.md": {"rehome": 15360}}`. A document within its budget is held at its budget. A pointer is held by what it is written as, its `pointer`: the same pointer written again in that document is held too.
     ///
@@ -101,9 +107,9 @@ enum Cmd {
     /// {
     ///   "documents": { "CLAUDE.md": "agent" },
     ///   "faults": [
-    ///     { "file": "notes.md", "fault": "unregistered", "kinds": ["readme", "agent", "adr", "glossary", "design-note"], "fix": "add `\"notes.md\" = \"<kind>\"` under `[documents]` in docfit.toml, <kind> one of readme, agent, adr, glossary, design-note" }
+    ///     { "file": "notes.md", "fault": "unregistered", "kinds": ["readme", "agent", "adr", "glossary", "design-note", "skill", "product"], "fix": "add `\"notes.md\" = \"<kind>\"` under `[documents]` in docfit.toml, <kind> one of readme, agent, adr, glossary, design-note, skill, product" }
     ///   ],
-    ///   "next": "add `\"notes.md\" = \"<kind>\"` under `[documents]` in docfit.toml, <kind> one of readme, agent, adr, glossary, design-note"
+    ///   "next": "add `\"notes.md\" = \"<kind>\"` under `[documents]` in docfit.toml, <kind> one of readme, agent, adr, glossary, design-note, skill, product"
     /// }
     /// ```
     ///
@@ -111,7 +117,7 @@ enum Cmd {
     ///
     /// ## What it may refuse
     ///
-    /// It exits {const:EXIT_ERROR}, naming every fault at once, outside a git repository, without a `docfit.toml` or its `[documents]` table, on a `docfit.toml` that is not TOML, on a glob that is not one, on an entry that is neither a kind nor a table of `kind`, `bytes` and `paragraph`, on a kind docfit does not know (the fix lists the kinds), on a document it cannot read as UTF-8 text, and on a baseline that is not one.
+    /// It exits {const:EXIT_ERROR}, naming every fault at once, outside a git repository, without a `docfit.toml` or its `[documents]` table, on a `docfit.toml` that is not TOML, on a glob that is not one, on an `ignore` that is not a list of globs, on an entry that is neither a kind nor a table of `kind`, `bytes` and `paragraph`, on a kind docfit does not know (the fix lists the kinds), on a document it cannot read as UTF-8 text, and on a baseline that is not one.
     ///
     /// ## What trips you up
     ///
@@ -129,32 +135,34 @@ enum Cmd {
         #[arg(long, verbatim_doc_comment)]
         repo: Option<PathBuf>,
     },
-    /// Adopts docfit on a repo in one command: registers each Markdown file by the kind its place says, holds the rest to rehome, and writes the baseline at today's sizes and broken pointers, so `docfit check` is green that day.
+    /// Adopts docfit on a repo in one command: ignores the Markdown under source and test directories, registers each Markdown file by the kind its place says, holds the rest to rehome, and writes the baseline at today's sizes and broken pointers, so `docfit check` is green that day.
     ///
     /// ## When to run it
     ///
-    /// Once, when a repo adopts docfit; then register each file it holds to rehome under a kind where one fits it, and run `docfit check`. Run again, it changes nothing already registered: it only registers files added since whose place says their kind.
+    /// Once, when a repo adopts docfit; then register each file it holds to rehome under a kind where one fits it, and run `docfit check`. Run again, it changes nothing already registered or ignored: it only ignores and registers files added since, as below.
     ///
     /// ## What it reads and writes
     ///
-    /// It reads what `docfit check` reads; without a `{const:CONFIG}` it starts one. It adds a line `"<path>" = "<kind>"` to the `[documents]` table for each Markdown file git tracks that no glob matches and whose place says its kind: `README.md` is `readme`; `CLAUDE.md`, `AGENTS.md` and a file in `docs/agents/` are `agent`; a file in `adr/` (such as `docs/adr/`) is `adr`; `GLOSSARY.md` is `glossary`. Every line already in `{const:CONFIG}`, and its comments, are kept as they are. Without a baseline yet, it writes `{const:BASELINE}` as `docfit ratchet` does on a repo without one: each document over its budget held at its size now, each pointer broken now held in its document, and each Markdown file registered under no kind held to rehome at its size now. With a baseline, it leaves it as it is: once a repo has adopted docfit, its baseline only tightens. Each file is written whole, through a file beside it renamed over it, and only when it changes.
+    /// It reads what `docfit check` reads; without a `{const:CONFIG}` it starts one. First it ignores Markdown that is code or a test's data: for each Markdown file git tracks that no glob ignores or registers, with one of {const:SOURCE} as a directory in its path, it adds the first such directory, as `<path>/**` (`crates/cli/src/**`), to `ignore`, unless an entry registers a file under it; the list is written again on one line where it was, or, without one, before the first table. Then it adds a line `"<path>" = "<kind>"` to the `[documents]` table for each Markdown file git tracks that no glob matches and whose place says its kind: `README.md` is `readme`; `CLAUDE.md`, `AGENTS.md` and a file in `docs/agents/` are `agent`; a file in `adr/` (such as `docs/adr/`) is `adr`; `GLOSSARY.md` is `glossary`; `SKILL.md`, and a file in a skill's directory `skills/<name>/` (such as its `references/`), is `skill`. No place says `product`: docfit does not guess it. Every other line already in `{const:CONFIG}`, and its comments, are kept as they are. Without a baseline yet, it writes `{const:BASELINE}` as `docfit ratchet` does on a repo without one: each document over its budget held at its size now, each pointer broken now held in its document, and each Markdown file registered under no kind held to rehome at its size now. With a baseline, it leaves it as it is: once a repo has adopted docfit, its baseline only tightens. Each file is written whole, through a file beside it renamed over it, and only when it changes.
     ///
     /// ## What it answers
     ///
     /// - `registered`: each file it registered this run, with its kind. Empty on a run that adds none.
+    /// - `ignored`: each glob it added to `ignore` this run, `glob`, with the `files` it ignores. Look at each: a glob over documents is taken out of `ignore` by hand, and its files registered under a kind. Empty on a run that adds none.
     /// - `rehome`: each file it held to rehome this run: `file`, `size` (its bytes), `kinds` (every kind, since its place says none) and `fix`, the line that registers it under a kind instead. docfit does not guess its kind.
     /// - `faults`: what `docfit check` would answer now, as it answers it; empty on a repo it adopted this run.
     /// - `baseline`: the baseline now.
     /// - `changed`: whether it wrote `{const:CONFIG}` or the baseline. `false` is nothing to adopt.
     /// - `next`: the first fault's fix; with none, commit `{const:CONFIG}` and the baseline, or that there is nothing to adopt.
     ///
-    /// For example, on a repo with `README.md` and `SPEC.md`:
+    /// For example, on a repo with `README.md`, `SPEC.md` and `src/help.md`:
     ///
     /// ```json
     /// {
     ///   "registered": { "README.md": "readme" },
+    ///   "ignored": [{ "glob": "src/**", "files": ["src/help.md"] }],
     ///   "rehome": [
-    ///     { "file": "SPEC.md", "size": 15360, "kinds": ["readme", "agent", "adr", "glossary", "design-note"], "fix": "add `\"SPEC.md\" = \"<kind>\"` under `[documents]` in docfit.toml, <kind> one of readme, agent, adr, glossary, design-note" }
+    ///     { "file": "SPEC.md", "size": 15360, "kinds": ["readme", "agent", "adr", "glossary", "design-note", "skill", "product"], "fix": "add `\"SPEC.md\" = \"<kind>\"` under `[documents]` in docfit.toml, <kind> one of readme, agent, adr, glossary, design-note, skill, product" }
     ///   ],
     ///   "faults": [],
     ///   "baseline": { "README.md": { "bytes": 65536, "pointers": ["docs/old.md"] }, "SPEC.md": { "rehome": 15360 } },
@@ -167,7 +175,7 @@ enum Cmd {
     ///
     /// ## What it may refuse
     ///
-    /// What `docfit check` refuses, apart from a missing `{const:CONFIG}`; a `[documents]` written other than as a table header, when it has a line to add; and a file it cannot write. It exits {const:EXIT_ERROR}.
+    /// What `docfit check` refuses, apart from a missing `{const:CONFIG}`; a `[documents]` written other than as a table header, when it has a line to add; an `ignore` written other than as a line `ignore = [...]` before the first table, when it has a glob to add; and a file it cannot write. It exits {const:EXIT_ERROR}.
     ///
     /// ## What trips you up
     ///
@@ -293,6 +301,8 @@ pub(crate) fn help() -> Help {
         .constant("HOMES", Home::table())
         .constant("BASELINE", BASELINE)
         .constant("CONFIG", CONFIG)
+        .constant("IGNORED", quoted(&documents::IGNORED))
+        .constant("SOURCE", quoted(&documents::SOURCE))
         .constant("ADRS", pointers::ADRS)
         .constant("EXTENSIONS", pointers::extensions())
         .constant("EXIT_OK", EXIT_OK)
@@ -364,7 +374,7 @@ fn registered_at(top: &Path) -> Result<(Answer, Vec<String>, Config), Vec<Refusa
     })?;
     let config = documents::config(&config)?;
     let tracked = repo::tracked(top)?;
-    let answer = documents::check(&config.entries, &tracked);
+    let answer = documents::check(&config, &tracked);
     Ok((answer, tracked, config))
 }
 
@@ -509,8 +519,9 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let top = top(repo)?;
     let config = config(&top)?;
     let files = repo::tracked(&top)?;
-    let (text, added) = documents::adopt(config.as_deref(), &files)?;
-    let answer = documents::check(&documents::config(&text)?.entries, &files);
+    let adoption = documents::adopt(config.as_deref(), &files)?;
+    let text = adoption.text;
+    let answer = documents::check(&documents::config(&text)?, &files);
     let texts = read(&top, &answer)?;
     let strays = strays(&top, &answer)?;
     let docs = measured(&texts, &Tree::new(&files));
@@ -540,11 +551,19 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
         )),
         None => json!("nothing to adopt: run `docfit check`"),
     };
-    let registered: std::collections::BTreeMap<_, _> =
-        added.iter().map(|(f, k)| (f, k.name())).collect();
+    let registered: std::collections::BTreeMap<_, _> = adoption
+        .registered
+        .iter()
+        .map(|(f, k)| (f, k.name()))
+        .collect();
+    let ignored: Vec<Value> = adoption
+        .ignored
+        .iter()
+        .map(|(glob, files)| json!({ "glob": glob, "files": files }))
+        .collect();
     Ok((
         pretty(&json!({
-            "registered": registered, "rehome": rehome, "faults": faults, "baseline": next,
+            "registered": registered, "ignored": ignored, "rehome": rehome, "faults": faults, "baseline": next,
             "changed": changed, "next": then,
         })),
         EXIT_OK,
@@ -700,6 +719,15 @@ fn write(path: &Path, text: &str) -> Result<(), Vec<Refusal>> {
     temp.push(".tmp");
     std::fs::write(&temp, text).map_err(failed)?;
     std::fs::rename(&temp, path).map_err(failed)
+}
+
+/// `names`, each in backticks, comma-separated.
+fn quoted(names: &[&str]) -> String {
+    names
+        .iter()
+        .map(|n| format!("`{n}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub(crate) fn refusal(fault: &str, fix: &str) -> Refusal {
