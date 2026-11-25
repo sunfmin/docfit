@@ -4,6 +4,7 @@
 use crate::budget::{self, BASELINE, Baseline, Measured, Size};
 use crate::documents::{self, Answer, CONFIG, Document, Refusal, TABLE};
 use crate::kind::Kind;
+use crate::pointers::{self, Tree};
 use crate::repo;
 use crate::sentences;
 use agent_help::Help;
@@ -32,6 +33,10 @@ pub(crate) const EXIT_ERROR: i32 = 2;
 ///
 /// Each document has a budget: its size in bytes, and its longest line in characters. The table above gives each kind's default; a `docfit.toml` entry may set its own (see `docfit check --help`). `docfit check` is red on a document over its budget, unless the baseline, `{const:BASELINE}`, holds it at more: then it is red only once it grows past what the baseline holds. `docfit ratchet` moves the baseline down to the documents' sizes now, and never up. So a repo adopting docfit with a document far over its budget runs `docfit ratchet` once and is green that day, and every change after can only shrink it.
 ///
+/// ## Pointers
+///
+/// What a document points at stays true: each repo path it names in backticks or links to, and each ADR it names by number (`ADR 0007` is a file `{const:ADRS}0007-*`), must be a path git tracks, or a directory holding one. `docfit check` is red on one that is not, naming the document, the line and what is missing. A pointer that breaks shows at once; a copy that goes stale shows nowhere, so point rather than copy.
+///
 /// ## Output
 ///
 /// Every command prints one JSON object on stdout with a `next` field: what to do next. A command that finds faults exits {const:EXIT_FAULTS}; each fault carries its `fix`. Nothing wrong exits {const:EXIT_OK}. A command that cannot finish exits {const:EXIT_ERROR} with `{"error": [{"fault": "...", "fix": "..."}, ...]}`: every fault it found, each with the command or edit that fixes it. Do every fix, then run the command again.
@@ -50,7 +55,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Checks that every Markdown file git tracks is registered in `docfit.toml` under one kind, within its budget, one sentence per line.
+    /// Checks that every Markdown file git tracks is registered in `docfit.toml` under one kind, within its budget, one sentence per line, and that what it points at is there.
     ///
     /// ## When to run it
     ///
@@ -81,6 +86,12 @@ enum Cmd {
     ///   - `over_budget`: its size in bytes, `size`, is over `limit`, its budget or, when the baseline holds it at more, that.
     ///   - `line_too_long`: its line `line` is `size` characters, over `limit`, as above. The fix is to break it at its sentences, one per line, which `docfit fmt` does; a sentence still too long is cut by hand.
     ///   - `unformatted`: `docfit fmt` would change it, first at its line `line`: some line holds more than one sentence. The fix is `docfit fmt <file>`.
+    ///   - `broken_pointer`: its line `line` points, as `pointer`, at `missing`, which git does not track. A pointer is:
+    ///     - a backticked repo path: with a `/` in it, or a name ending in one of {const:EXTENSIONS}, and none of a command's space, a glob's `*`, a placeholder's `<>`, a URL's `:` (but a `:<line>` after it), or a leading `/` or `~`. It is read from the repo's top or the document's directory, and is there if either is.
+    ///     - a Markdown link's target, `[text](target)`, read from the document's directory (a leading `/` is the repo's top), without its `#anchor`. A URL (`https:`, `mailto:`) and an anchor alone are not checked.
+    ///     - an ADR named by number, `ADR 0007` or `ADR-0007`: there must be a file `{const:ADRS}0007-*`.
+    ///
+    ///     A fenced code block points at nothing.
     /// - `next`: the first fault's fix; with none, `docfit ratchet` when a document shrank below what the baseline holds, or that there is nothing to do.
     ///
     /// For example, with `CLAUDE.md` registered and `notes.md` not:
@@ -106,6 +117,7 @@ enum Cmd {
     /// - A design note is off unless the repo turns it on: registering a file as `design-note` is turning it on, for that file.
     /// - A glob matches paths from the repo's top, whatever directory you run it in.
     /// - It measures the working tree, not git's index: an edit not yet staged counts.
+    /// - A pointer is there only if git tracks it: a file the build makes, or one `.gitignore` hides, is `broken_pointer`. Name such a file, or one that does not exist yet, without backticks.
     /// - A document that shrank stays held at the old size until `docfit ratchet` runs: run it and commit the baseline with the change.
     #[command(
         next_help_heading = "Run by the agent, and by the gate",
@@ -202,6 +214,8 @@ pub(crate) fn help() -> Help {
     Help::new(<Cli as clap::CommandFactory>::command())
         .constant("KINDS", Kind::table())
         .constant("BASELINE", BASELINE)
+        .constant("ADRS", pointers::ADRS)
+        .constant("EXTENSIONS", pointers::extensions())
         .constant("EXIT_OK", EXIT_OK)
         .constant("EXIT_FAULTS", EXIT_FAULTS)
         .constant("EXIT_ERROR", EXIT_ERROR)
@@ -237,8 +251,8 @@ pub(crate) fn run(args: impl IntoIterator<Item = std::ffi::OsString>) -> (String
     }
 }
 
-/// The repo's top, and its documents registered.
-fn registered(repo: Option<PathBuf>) -> Result<(PathBuf, Answer), Vec<Refusal>> {
+/// The repo's top, its documents registered, and the paths git tracks.
+fn registered(repo: Option<PathBuf>) -> Result<(PathBuf, Answer, Vec<String>), Vec<Refusal>> {
     let top = repo::top(&repo.unwrap_or_else(|| PathBuf::from(".")))?;
     let config = std::fs::read_to_string(top.join(CONFIG)).map_err(|e| {
         vec![refusal(
@@ -247,8 +261,9 @@ fn registered(repo: Option<PathBuf>) -> Result<(PathBuf, Answer), Vec<Refusal>> 
         )]
     })?;
     let entries = documents::entries(&config)?;
-    let answer = documents::check(&entries, &repo::tracked(&top)?);
-    Ok((top, answer))
+    let tracked = repo::tracked(&top)?;
+    let answer = documents::check(&entries, &tracked);
+    Ok((top, answer, tracked))
 }
 
 /// The registered documents named in `files` (every one, when it names
@@ -328,13 +343,15 @@ fn baseline(top: &Path) -> Result<Option<Baseline>, Vec<Refusal>> {
 }
 
 fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
-    let (top, answer) = registered(repo)?;
+    let (top, answer, tracked) = registered(repo)?;
     let texts = read(&top, &answer, &[])?;
     let docs = measured(&texts);
     let held = baseline(&top)?;
     let mut faults = answer.faults.clone();
     faults.extend(budget::check(&docs, held.as_ref()));
+    let tree = Tree::new(&tracked);
     for (file, _, text) in &texts {
+        faults.extend(pointers::check(file, text, &tree));
         if let (_, Some(line)) = sentences::format(text) {
             faults.push(json!({
                 "file": file, "fault": "unformatted", "line": line,
@@ -373,7 +390,7 @@ fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
 }
 
 fn ratchet(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
-    let (top, answer) = registered(repo)?;
+    let (top, answer, _) = registered(repo)?;
     let texts = read(&top, &answer, &[])?;
     let docs = measured(&texts);
     let held = baseline(&top)?;
@@ -394,7 +411,7 @@ fn ratchet(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
 }
 
 fn fmt(repo: Option<PathBuf>, files: Vec<String>) -> Result<(String, i32), Vec<Refusal>> {
-    let (top, answer) = registered(repo)?;
+    let (top, answer, _) = registered(repo)?;
     let mut formatted = Vec::new();
     for (file, _, text) in read(&top, &answer, &files)? {
         if let (new, Some(_)) = sentences::format(&text) {

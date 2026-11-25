@@ -473,6 +473,95 @@ fn at_its_budget_exactly_is_within_it() {
     );
 }
 
+const POINTED: &str = "[documents]\n\"README.md\" = \"readme\"\n\"docs/**/*.md\" = \"agent\"\n";
+
+/// The `broken_pointer` faults of `readme` (and `docs/agents/a.md`, `guide`),
+/// each as (file, line, "<pointer> -> <missing>").
+fn broken(readme: &str, guide: &str) -> Vec<(String, u64, String)> {
+    let dir = repo(&[
+        ("docfit.toml", POINTED),
+        ("README.md", readme),
+        ("docs/agents/a.md", guide),
+        ("docs/adr/0001-one.md", "x\n"),
+        ("src/main.rs", "fn main() {}\n"),
+    ]);
+    let (code, answer) = check(dir.path());
+    let faults: Vec<_> = answer["faults"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["fault"] == "broken_pointer")
+        .map(|f| {
+            let fix = f["fix"].as_str().unwrap();
+            assert!(fix.contains(f["missing"].as_str().unwrap()), "{fix}");
+            (
+                f["file"].as_str().unwrap().to_string(),
+                f["line"].as_u64().unwrap(),
+                format!(
+                    "{} -> {}",
+                    f["pointer"].as_str().unwrap(),
+                    f["missing"].as_str().unwrap()
+                ),
+            )
+        })
+        .collect();
+    assert_eq!(code, if faults.is_empty() { 0 } else { 1 }, "{answer}");
+    faults
+}
+
+fn at(file: &str, line: u64, missing: &str) -> (String, u64, String) {
+    (file.to_string(), line, missing.to_string())
+}
+
+#[test]
+fn a_backticked_path_that_exists_is_green_and_one_that_does_not_red() {
+    let readme = "Run `src/main.rs:1`, see `docs/agents/`, `docfit.toml` and `docs/adr`.\n\
+        Not paths: `docfit --help`, `*.md`, `<dir>/x`, `~/a/b`, `/usr/bin`, `.md`, `Kind::ALL`, `a.b`, `nowhere.md:x`.\n\
+        Gone: `src/gone.rs` and `notes.toml`.\n";
+    assert_eq!(
+        broken(
+            readme,
+            "Here `a.md`, from the top `README.md`; not `b.md`.\n"
+        ),
+        [
+            at("README.md", 3, "src/gone.rs -> src/gone.rs"),
+            at("README.md", 3, "notes.toml -> notes.toml"),
+            at("docs/agents/a.md", 1, "b.md -> b.md"),
+        ]
+    );
+}
+
+#[test]
+fn a_link_to_a_missing_file_is_red_and_a_url_is_not_checked() {
+    let readme = "[a](docs/agents/a.md#top), [`src`](src/), [t](</src/main.rs> \"title\")\n\
+        [web](https://example.com/x.md), [mail](mailto:a@b.c), [anchor](#here)\n\
+        ```\n[in a fence](nowhere.md) `nowhere.md`\n```\n\
+        [gone](docs/gone.md)\n";
+    let guide =
+        "[up](../../README.md), [adr](../adr/0001-one.md), [out](../../../x.md), [no](c.md)\n";
+    assert_eq!(
+        broken(readme, guide),
+        [
+            at("README.md", 6, "docs/gone.md -> docs/gone.md"),
+            at("docs/agents/a.md", 1, "../../../x.md -> ../../../x.md"),
+            at("docs/agents/a.md", 1, "c.md -> docs/agents/c.md"),
+        ]
+    );
+}
+
+#[test]
+fn an_adr_named_by_a_number_with_no_file_of_it_is_red() {
+    let readme =
+        "Per ADR 0001 and ADR-1, ADRs, `ADR 0002`, BADR 0003, ADR 0004x, ADR-.\nBut ADR 0009.\n";
+    assert_eq!(
+        broken(readme, "Or ADR-0010.\n"),
+        [
+            at("README.md", 2, "ADR 0009 -> docs/adr/0009-*"),
+            at("docs/agents/a.md", 1, "ADR-0010 -> docs/adr/0010-*"),
+        ]
+    );
+}
+
 const PROSE: &str = "# Title. Still the title.\n\nOne. Two? Three!\n- 第一句。第二句。\n\n```sh\necho a. b.\n```\n\n| a. b. | c. d. |\n|---|---|\n";
 
 #[test]
