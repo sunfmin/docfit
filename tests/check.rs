@@ -192,3 +192,29 @@ fn outside_a_git_repository_it_is_refused() {
         "run it in a git repository, or give one with `--repo`"
     );
 }
+
+#[test]
+fn a_file_whose_name_says_its_kind_is_offered_that_kind() {
+    let files = [
+        ("docfit.toml", "[documents]\n"),
+        ("a/README.md", ""),
+        ("AGENTS.md", ""),
+        ("GLOSSARY.md", ""),
+    ];
+    let (code, answer) = check(repo(&files).path());
+    assert_eq!(code, 1, "{answer}");
+    let kinds: Vec<_> = answer["faults"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| (f["file"].clone(), f["kinds"][0].clone()))
+        .collect();
+    assert_eq!(
+        serde_json::json!(kinds),
+        serde_json::json!([
+            ["AGENTS.md", "agent"],
+            ["GLOSSARY.md", "glossary"],
+            ["a/README.md", "readme"]
+        ])
+    );
+}

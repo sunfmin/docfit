@@ -58,16 +58,14 @@ impl Kind {
     /// The kinds a file at `path` could be: the one its place conventionally
     /// says, or, where its place says none, every kind.
     pub(crate) fn candidates(path: &str) -> Vec<Kind> {
-        let file = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
-        let dir = path
-            .strip_suffix(path.rsplit('/').next().unwrap_or(""))
-            .unwrap_or("");
+        let (dir, file) = path.rsplit_once('/').unwrap_or(("", path));
+        let file = file.to_ascii_lowercase();
         let conventional = match file.as_str() {
             "readme.md" => Some(Kind::Readme),
             "claude.md" | "agents.md" => Some(Kind::Agent),
             "glossary.md" => Some(Kind::Glossary),
-            _ if dir.ends_with("docs/agents/") => Some(Kind::Agent),
-            _ if dir.ends_with("adr/") => Some(Kind::Adr),
+            _ if dir.ends_with("docs/agents") => Some(Kind::Agent),
+            _ if dir.ends_with("adr") => Some(Kind::Adr),
             _ => None,
         };
         conventional.map_or_else(|| Kind::ALL.to_vec(), |k| vec![k])

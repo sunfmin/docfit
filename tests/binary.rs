@@ -54,3 +54,14 @@ fn the_manual_holds_the_kinds_table() {
         "{out}"
     );
 }
+
+#[test]
+fn an_unknown_topic_is_refused_with_its_fix() {
+    let (code, out) = docfit(&["help", "nope"]);
+    assert_eq!(code, 2);
+    let answer: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        answer["error"][0]["fix"],
+        "run `docfit --help` for the topics"
+    );
+}
