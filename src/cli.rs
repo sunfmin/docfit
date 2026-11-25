@@ -8,11 +8,12 @@ use crate::paragraph::{self, Adr, Home, Known};
 use crate::pointers::{self, Tree};
 use crate::refs::{self, Found};
 use crate::repo;
+use crate::restates::{self, Index, Restates, Text};
 use crate::tasks;
 use agent_help::{Help, Topic};
 use clap::{FromArgMatches, Parser, Subcommand};
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// The command finished and found nothing wrong.
@@ -38,7 +39,7 @@ pub(crate) const EXIT_ERROR: i32 = 2;
 ///
 /// ## Pointers
 ///
-/// What a document points at stays true: each repo path it names in backticks or links to, and each ADR it names by number (`ADR 0007` is a file `{const:ADRS}0007-*`), must be a path git tracks, or a directory holding one. `docfit check` is red on one that is not, naming the document, the line and what is missing. A pointer that breaks shows at once; a copy that goes stale shows nowhere, so point rather than copy.
+/// What a document points at stays true: each repo path it names in backticks or links to, and each ADR it names by number (`ADR 0007` is a file `{const:ADRS}0007-*`), must be a path git tracks, or a directory holding one. `docfit check` is red on one that is not, naming the document, the line and what is missing. A pointer that breaks shows at once; a copy that goes stale shows nowhere, so point rather than copy: `docfit check` is red on a new copy of a catalog's string or of another file's lines (`docfit check --help`, Restatements).
 ///
 /// ## Output
 ///
@@ -58,15 +59,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Checks that every Markdown file git tracks is registered in `docfit.toml` under one kind, within its budget, and that what it points at is there; and that no tracked text file cites the local tracker anew.
+    /// Checks that every Markdown file git tracks is registered in `docfit.toml` under one kind, within its budget, and that what it points at is there; that no document restates a catalog's string or another file's lines anew; and that no tracked text file cites the local tracker anew.
     ///
     /// ## When to run it
     ///
-    /// In the repo's gate, and after adding, moving, renaming or growing a Markdown file. It reads only git's index, `docfit.toml`, the baseline and the documents, so it takes well under a second.
+    /// In the repo's gate, and after adding, moving, renaming or growing a Markdown file. It reads git's index, `docfit.toml`, the baseline and the repo's text files, so it takes well under a second.
     ///
     /// ## What it reads and writes
     ///
-    /// It reads `docfit.toml` at the top of the repo, and the paths git tracks there (`git ls-files`): every one ending `.md` is a document. A file on disk that git does not track is not. It reads each registered document's text from the working tree, and the baseline `{const:BASELINE}` if there is one. It writes nothing. `docfit.toml` holds one table, `[documents]`, a line per glob, the glob a path from the repo's top and the kind one of the kinds in `docfit --help`, or a table that also sets the document's budget, `bytes` (its size) or `paragraph` (its longest paragraph, in characters) or both:
+    /// It reads `docfit.toml` at the top of the repo, and the paths git tracks there (`git ls-files`): every one ending `.md` is a document. A file on disk that git does not track is not. It reads each registered document's text from the working tree, every other text file git tracks that `ignore` does not match (for restatements and local tracker refs, below), the string catalogs `catalogs` lists (`docfit where --help`), and the baseline `{const:BASELINE}` if there is one. It writes nothing. `docfit.toml` holds one table, `[documents]`, a line per glob, the glob a path from the repo's top and the kind one of the kinds in `docfit --help`, or a table that also sets the document's budget, `bytes` (its size) or `paragraph` (its longest paragraph, in characters) or both:
     ///
     /// ```toml
     /// [documents]
@@ -84,11 +85,20 @@ enum Cmd {
     /// ignore = ["src/**", "tests/fixtures/**"]
     /// ```
     ///
-    /// The baseline maps a document to the measures it is held at over its budget and the pointers it is held at broken, a file registered under no kind to the bytes it is held at to rehome, and any file to the local refs it is held at, as `docfit ratchet` writes it: `{"README.md": {"bytes": 65536, "paragraph": 18000, "pointers": ["docs/old.md"]}, "SPEC.md": {"rehome": 15360}, "src/a.rs": {"local_refs": 4}}`. A document within its budget is held at its budget. A pointer is held by what it is written as, its `pointer`: the same pointer written again in that document is held too.
+    /// The baseline maps a document to the measures it is held at over its budget and the pointers it is held at broken, a document to the catalog strings and copied runs it is held at (`strings`, `copies`), a file registered under no kind to the bytes it is held at to rehome, and any file to the local refs it is held at, as `docfit ratchet` writes it: `{"README.md": {"bytes": 65536, "paragraph": 18000, "pointers": ["docs/old.md"], "strings": 84}, "SPEC.md": {"rehome": 15360}, "src/a.rs": {"local_refs": 4}}`. A document within its budget is held at its budget. A pointer is held by what it is written as, its `pointer`: the same pointer written again in that document is held too.
+    ///
+    /// ## Restatements
+    ///
+    /// A copy of what the code or a string catalog already says gives one fact two homes, and goes stale without anyone noticing. `docfit check` is red, with the fault `restates`, on a document holding more of either of these than the baseline holds it at (none, unless held):
+    ///
+    /// - `strings`: a string quoted outside fenced code and code spans that a catalog holds verbatim, as `docfit where` finds it (`docfit where --help`). Without `catalogs`, there is none. Point at the key, or at the screen test that shows it, instead.
+    /// - `copies`: a run of {const:RUN} or more non-blank lines, each trimmed and blank lines between them skipped, that another text file git tracks and `ignore` does not match holds in the same order: code, or another document. A run in a fenced block that names its source, by its path or its file name, on its opening line or on the non-blank line before the block, is no copy of that file. A file that is a symbolic link is not read, so it restates nothing and nothing restates it. Keep the run in one place and point at it.
+    ///
+    /// A code span naming what is in the code is a pointer, the way a document should point at code: `docfit where` lists it, and it is never red. `docfit where` and `docfit check` find restatements by the one detector. The baseline holds each document's count of each, shrink-only: `docfit init` holds each document's counts when it adopts docfit, and of a measure a baseline holds no document's count of yet (so adding `catalogs` later, then running `docfit init`, holds the strings); `docfit ratchet` lowers a count to the count now, drops it at 0, and never adds one.
     ///
     /// ## Local tracker refs
     ///
-    /// Content a repo keeps never cites the local tracker: its issues live in one host's database, so a ref to one is a pointer no later reader can follow. `docfit.toml` names the tracker's refs, before its first table: `{const:LOCAL_REFS} = ["rollmind", "factorium"]`, each a name whose `<name>#<digits>` (`rollmind#38`) cites the local tracker; whoever wires docfit into the repo writes it. Without it this check is off, and `next` says how to turn it on. It reads every text file git tracks that `ignore` does not match ({const:IGNORED} among them: the fits' records are their bookkeeping), Markdown or not; a file with a NUL byte in its first 8000 is binary, and not read, and so is one it cannot read. A ref is `<name>#<digits>` with a listed name, not run on by a letter, digit, `-`, `_` or `.` before it or a letter, digit or `_` after it; one with an owner (`sunfmin/lore#25`) or in a URL (a word with `://`) is not local. A commit message is not read: it may carry an issue's id, as long as it reads alone. `docfit check` is red on a file with more refs than the baseline holds it at (none, unless held). The baseline holds a file's count shrink-only: `docfit init` holds each file's count when it adopts docfit, or on a baseline that holds no refs yet; `docfit ratchet` (holding each as `docfit init` does on a repo without a baseline) lowers it to the count now, drops it at 0, and never adds a file it does not hold.
+    /// Content a repo keeps never cites the local tracker: its issues live in one host's database, so a ref to one is a pointer no later reader can follow. `docfit.toml` names the tracker's refs, before its first table: `{const:LOCAL_REFS} = ["rollmind", "factorium"]`, each a name whose `<name>#<digits>` (`rollmind#38`) cites the local tracker; whoever wires docfit into the repo writes it. Without it this check is off, and `next` says how to turn it on. It reads every text file git tracks that `ignore` does not match ({const:IGNORED} among them: the fits' records are their bookkeeping), Markdown or not; a file with a NUL byte in its first 8000 is binary, and not read, and so is one it cannot read or a symbolic link. A ref is `<name>#<digits>` with a listed name, not run on by a letter, digit, `-`, `_` or `.` before it or a letter, digit or `_` after it; one with an owner (`sunfmin/lore#25`) or in a URL (a word with `://`) is not local. A commit message is not read: it may carry an issue's id, as long as it reads alone. `docfit check` is red on a file with more refs than the baseline holds it at (none, unless held). The baseline holds a file's count shrink-only: `docfit init` holds each file's count when it adopts docfit, or on a baseline that holds no refs yet; `docfit ratchet` (holding each as `docfit init` does on a repo without a baseline) lowers it to the count now, drops it at 0, and never adds a file it does not hold.
     ///
     /// ## What it answers
     ///
@@ -105,6 +115,7 @@ enum Cmd {
     ///     - an ADR named by number, `ADR 0007` or `ADR-0007`: there must be a file `{const:ADRS}0007-*`.
     ///
     ///     A fenced code block points at nothing.
+    ///   - `restates`: the document holds `size` restatements of the kind `restates` (`strings` or `copies`, see Restatements above), over `limit`, the count the baseline holds it at; `line` is where the first past that count starts (a string's paragraph), `found` what it is (the string, or the run's first line) and `from` where the repo already says it (the catalog, or `<file>:<line>` of the run copied).
     ///   - `local_ref`: any text file it reads (see Local tracker refs above) holds `size` refs, over `limit`, the count the baseline holds it at; `line` and `ref` are the first ref past that count, in file order. The fix: replace it with what it points at, or delete it.
     /// - `next`: the first fault's fix; with none, `docfit ratchet` when a file shrank below what the baseline holds or went from it, or that there is nothing to do.
     ///
@@ -124,7 +135,7 @@ enum Cmd {
     ///
     /// ## What it may refuse
     ///
-    /// It exits {const:EXIT_ERROR}, naming every fault at once, outside a git repository, without a `docfit.toml` or its `[documents]` table, on a `docfit.toml` that is not TOML, on a glob that is not one, on an `ignore` that is not a list of globs, on a `{const:LOCAL_REFS}` that is not a list of names (letters, digits, `-`, `_`, `.`), on an entry that is neither a kind nor a table of `kind`, `bytes` and `paragraph`, on a kind docfit does not know (the fix lists the kinds), on a document it cannot read as UTF-8 text, and on a baseline that is not one.
+    /// It exits {const:EXIT_ERROR}, naming every fault at once, outside a git repository, without a `docfit.toml` or its `[documents]` table, on a `docfit.toml` that is not TOML, on a glob that is not one, on an `ignore` that is not a list of globs, on a `{const:LOCAL_REFS}` that is not a list of names (letters, digits, `-`, `_`, `.`), on a `catalogs` that is not a list of globs or a glob in it that matches no tracked file, on a catalog it cannot read, on an entry that is neither a kind nor a table of `kind`, `bytes` and `paragraph`, on a kind docfit does not know (the fix lists the kinds), on a document it cannot read as UTF-8 text, and on a baseline that is not one.
     ///
     /// ## What trips you up
     ///
@@ -150,7 +161,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads what `docfit check` reads; without a `{const:CONFIG}` it starts one. First it ignores Markdown that is code or a test's data: for each Markdown file git tracks that no glob ignores or registers, with one of {const:SOURCE} as a directory in its path, it adds the first such directory, as `<path>/**` (`crates/cli/src/**`), to `ignore`, unless an entry registers a file under it; the list is written again on one line where it was, or, without one, before the first table. Then it adds a line `"<path>" = "<kind>"` to the `[documents]` table for each Markdown file git tracks that no glob matches and whose place says its kind: `README.md` is `readme`; `CLAUDE.md`, `AGENTS.md` and a file in `docs/agents/` are `agent`; a file in `adr/` (such as `docs/adr/`) is `adr`; `GLOSSARY.md` is `glossary`; `SKILL.md`, and a file in a skill's directory `skills/<name>/` (such as its `references/`), is `skill`. No place says `product`: docfit does not guess it. Every other line already in `{const:CONFIG}`, and its comments, are kept as they are. Without a baseline yet, it writes `{const:BASELINE}` as `docfit ratchet` does on a repo without one: each document over its budget held at its size now, each pointer broken now held in its document, and each Markdown file registered under no kind held to rehome at its size now. With a baseline, it leaves it as it is: once a repo has adopted docfit, its baseline only tightens; but on one that holds no local tracker refs yet, it holds each file's refs at their count now (`docfit check --help`, Local tracker refs). Each file is written whole, through a file beside it renamed over it, and only when it changes.
+    /// It reads what `docfit check` reads; without a `{const:CONFIG}` it starts one. First it ignores Markdown that is code or a test's data: for each Markdown file git tracks that no glob ignores or registers, with one of {const:SOURCE} as a directory in its path, it adds the first such directory, as `<path>/**` (`crates/cli/src/**`), to `ignore`, unless an entry registers a file under it; the list is written again on one line where it was, or, without one, before the first table. Then it adds a line `"<path>" = "<kind>"` to the `[documents]` table for each Markdown file git tracks that no glob matches and whose place says its kind: `README.md` is `readme`; `CLAUDE.md`, `AGENTS.md` and a file in `docs/agents/` are `agent`; a file in `adr/` (such as `docs/adr/`) is `adr`; `GLOSSARY.md` is `glossary`; `SKILL.md`, and a file in a skill's directory `skills/<name>/` (such as its `references/`), is `skill`. No place says `product`: docfit does not guess it. Every other line already in `{const:CONFIG}`, and its comments, are kept as they are. Without a baseline yet, it writes `{const:BASELINE}` as `docfit ratchet` does on a repo without one: each document over its budget held at its size now, each pointer broken now held in its document, and each Markdown file registered under no kind held to rehome at its size now. With a baseline, it leaves it as it is: once a repo has adopted docfit, its baseline only tightens; but on one that holds no local tracker refs yet, it holds each file's refs at their count now (`docfit check --help`, Local tracker refs), and likewise each document's catalog strings, or its copied runs, on one that holds no document's count of them yet (Restatements there). Each file is written whole, through a file beside it renamed over it, and only when it changes.
     ///
     /// ## What it answers
     ///
@@ -202,7 +213,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads what `docfit check` reads, and writes `{const:BASELINE}` (whole, through a file beside it renamed over it) when the baseline moves. With no baseline yet, it holds each document over its budget, in each measure it is over, at its size now, and each Markdown file registered under no kind to rehome, at its size in bytes now. With one, a file held to rehome is held at the smaller of what is held and its size now, and leaves it once it is gone or registered under a kind; a file registered under no kind it does not hold is never added; each measure held moves to the smaller of what is held and the size now; a measure it does not hold stays unheld, so a document that grows over its budget is never added; a measure back within budget leaves it. Broken pointers likewise: with no baseline yet, each pointer broken now is held in its document; with one, a held pointer leaves once it is fixed (or its document goes), and a pointer broken since is never added. Local tracker refs likewise, by each file's count (`docfit check --help`); with the check off, a held count stays as it is.
+    /// It reads what `docfit check` reads, and writes `{const:BASELINE}` (whole, through a file beside it renamed over it) when the baseline moves. With no baseline yet, it holds each document over its budget, in each measure it is over, at its size now, and each Markdown file registered under no kind to rehome, at its size in bytes now. With one, a file held to rehome is held at the smaller of what is held and its size now, and leaves it once it is gone or registered under a kind; a file registered under no kind it does not hold is never added; each measure held moves to the smaller of what is held and the size now; a measure it does not hold stays unheld, so a document that grows over its budget is never added; a measure back within budget leaves it. Broken pointers likewise: with no baseline yet, each pointer broken now is held in its document; with one, a held pointer leaves once it is fixed (or its document goes), and a pointer broken since is never added. Local tracker refs likewise, by each file's count (`docfit check --help`); with the check off, a held count stays as it is. Restatements likewise, by each document's count of catalog strings and of copied runs.
     ///
     /// ## What it answers
     ///
@@ -244,6 +255,7 @@ enum Cmd {
     ///
     /// - `code`: the code spans, one word each, that are a path git tracks (a file or a directory) or that a tracked text file not ending `.md` holds as a whole word, as `git grep -w` finds it (a file with a NUL byte in its first 8000 is binary, and not read).
     /// - `strings`: the strings quoted with `"…"`, `“…”`, `「…」` or `『…』` that a catalog holds verbatim as a quoted string.
+    /// - `copies`: where each run it starts that is copied from another tracked file is, `<file>:<line>`, as `docfit check` finds it (`docfit check --help`, Restatements). Listed only: it suggests no home, since either copy may be the one to keep.
     /// - `evidence`: numbers with units (`1.5 s`, `63 MiB`, `70 分钟`).
     /// - `local_refs`: references to the local tracker's issues (`#123`, `<checkout>#123`). Only this host can open them, so a repo's content never cites one.
     /// - `decision`: a choice or a reason (`because`, `chose`, `choose`, `因为`, `选`) beside an alternative (`instead of`, `rather than`, `而不是`, `而非`); both, or none is seen.
@@ -256,7 +268,7 @@ enum Cmd {
     /// ## What it answers
     ///
     /// - `file`: the document, from the repo's top; `kind`: its kind, or null when `docfit.toml` registers it under none.
-    /// - `paragraphs`: in order, each with `line` (where it starts), `text` (its first 80 characters), `code` and `strings` (each `{"count", "found"}`, distinct, in order), `evidence`, `local_refs` and `decision` (lists), `pointer`, `home`, and, with home `adr`, `adr`: the ADR it names by number (`ADR 0002`, `adr/0002-…`) or title, or null for a new one.
+    /// - `paragraphs`: in order, each with `line` (where it starts), `text` (its first 80 characters), `code`, `strings` and `copies` (each `{"count", "found"}`, distinct, in order), `evidence`, `local_refs` and `decision` (lists), `pointer`, `home`, and, with home `adr`, `adr`: the ADR it names by number (`ADR 0002`, `adr/0002-…`) or title, or null for a new one.
     /// - `homes`: how many paragraphs each home has.
     /// - `next`: move each paragraph to its home, then `docfit check`.
     ///
@@ -267,7 +279,7 @@ enum Cmd {
     ///   "file": "README.md",
     ///   "kind": "readme",
     ///   "paragraphs": [
-    ///     { "line": 3, "text": "Startup took 1.5 s (#12).", "code": { "count": 0, "found": [] }, "strings": { "count": 0, "found": [] }, "evidence": ["1.5 s"], "local_refs": ["#12"], "decision": [], "pointer": false, "home": "evidence" }
+    ///     { "line": 3, "text": "Startup took 1.5 s (#12).", "code": { "count": 0, "found": [] }, "strings": { "count": 0, "found": [] }, "copies": { "count": 0, "found": [] }, "evidence": ["1.5 s"], "local_refs": ["#12"], "decision": [], "pointer": false, "home": "evidence" }
     ///   ],
     ///   "homes": { "keep": 0, "adr": 0, "delete": 0, "evidence": 1, "replace": 0, "judge": 0 },
     ///   "next": "move each paragraph to its home (keep 0, adr 0, delete 0, evidence 1, replace 0, judge 0; `docfit where --help` says what each is), then run `docfit check`"
@@ -390,6 +402,7 @@ pub(crate) fn help() -> Help {
         .constant("CONFIG", CONFIG)
         .constant("IGNORED", quoted(&documents::IGNORED))
         .constant("LOCAL_REFS", refs::KEY)
+        .constant("RUN", restates::RUN)
         .constant("SOURCE", quoted(&documents::SOURCE))
         .constant("ADRS", pointers::ADRS)
         .constant("EXTENSIONS", pointers::extensions())
@@ -446,36 +459,90 @@ fn config(top: &Path) -> Result<Option<String>, Vec<Refusal>> {
     }
 }
 
-/// The local refs in each text file of `tracked` that `config` does not
-/// ignore; `None` when it lists no `local_issue_refs`. A file that cannot be
-/// read, or holds a NUL byte in its first 8000 (binary), is not read.
-fn found(top: &Path, config: &Config, tracked: &[String]) -> Option<Found> {
+/// The text of each of `files` at `top`: one that is a symbolic link, that
+/// cannot be read, or that holds a NUL byte in its first 8000 (binary), is
+/// not read.
+fn texts<'a>(top: &Path, files: impl Iterator<Item = &'a String>) -> Vec<Text> {
+    files
+        .filter(|f| std::fs::symlink_metadata(top.join(f)).is_ok_and(|m| !m.is_symlink()))
+        .filter_map(|f| Some((f, std::fs::read(top.join(f)).ok()?)))
+        .filter(|(_, bytes)| !bytes.iter().take(8000).any(|b| *b == 0))
+        .map(|(f, bytes)| Text {
+            path: f.clone(),
+            text: String::from_utf8_lossy(&bytes).into_owned(),
+        })
+        .collect()
+}
+
+/// The local refs in each of `kept`, the text files `config` does not
+/// ignore; `None` when it lists no `local_issue_refs`.
+fn found(config: &Config, kept: &[Text]) -> Option<Found> {
     let names = config.local_refs.as_ref()?;
     let mut found = Found::new();
-    for file in config.kept(tracked) {
-        let Ok(bytes) = std::fs::read(top.join(file)) else {
-            continue;
-        };
-        if bytes.iter().take(8000).any(|b| *b == 0) {
-            continue;
-        }
-        let refs = refs::find(&String::from_utf8_lossy(&bytes), names);
+    for file in kept {
+        let refs = refs::find(&file.text, names);
         if !refs.is_empty() {
-            found.insert(file.clone(), refs);
+            found.insert(file.path.clone(), refs);
         }
     }
     Some(found)
 }
 
-/// The baseline `held` ratchets to: the budgets' and the local refs'.
+/// What each document `answer` registers restates, read from `kept`, the
+/// text files `docfit.toml` does not ignore, against those and `catalogs`.
+fn restated<'a>(
+    answer: &Answer,
+    kept: &'a [Text],
+    catalogs: &[Text],
+) -> BTreeMap<&'a str, Restates> {
+    let index = Index::new(kept);
+    kept.iter()
+        .filter(|t| answer.documents.contains_key(&t.path))
+        .map(|t| {
+            (
+                t.path.as_str(),
+                restates::find(&t.path, &t.text, catalogs, &index),
+            )
+        })
+        .collect()
+}
+
+/// What `docfit check`, `ratchet` and `init` read of a repo beyond its
+/// documents: its text files `docfit.toml` does not ignore, the local refs in
+/// them, and its string catalogs.
+struct Read {
+    kept: Vec<Text>,
+    found: Option<Found>,
+    catalogs: Vec<Text>,
+}
+
+impl Read {
+    fn at(top: &Path, config: &Config, tracked: &[String]) -> Result<Read, Vec<Refusal>> {
+        let kept = texts(top, config.kept(tracked));
+        Ok(Read {
+            found: found(config, &kept),
+            catalogs: catalogs(top, config, tracked)?,
+            kept,
+        })
+    }
+
+    fn restated(&self, answer: &Answer) -> BTreeMap<&str, Restates> {
+        restated(answer, &self.kept, &self.catalogs)
+    }
+}
+
+/// The baseline `held` ratchets to: the budgets', the local refs' and the
+/// restatements'.
 fn ratcheted(
     docs: &[Measured],
     strays: &[Stray],
     found: Option<&Found>,
+    restated: &BTreeMap<&str, Restates>,
     held: Option<&Baseline>,
 ) -> Baseline {
     let mut next = budget::ratchet(docs, strays, held);
     refs::ratchet(found, held, &mut next);
+    restates::ratchet(restated, held, &mut next);
     next
 }
 
@@ -559,13 +626,14 @@ fn strays<'a>(top: &Path, answer: &'a Answer) -> Result<Vec<Stray<'a>>, Vec<Refu
 }
 
 /// Every fault, in path order: `answer`'s that are not a stray's, those
-/// `budget::check` finds in `docs` and `strays` against `baseline`, and those
-/// `refs::check` finds in `found`.
+/// `budget::check` finds in `docs` and `strays` against `baseline`, those
+/// `refs::check` finds in `found`, and those `restates::check` finds in
+/// `restated`.
 fn faults(
     answer: &Answer,
     docs: &[Measured],
     strays: &[Stray],
-    found: Option<&Found>,
+    (found, restated): (Option<&Found>, &BTreeMap<&str, Restates>),
     baseline: Option<&Baseline>,
 ) -> Vec<Value> {
     let mut faults: Vec<Value> = answer
@@ -576,6 +644,7 @@ fn faults(
         .collect();
     faults.extend(budget::check(docs, strays, baseline));
     faults.extend(found.map_or_else(Vec::new, |f| refs::check(f, baseline)));
+    faults.extend(restates::check(restated, baseline));
     faults.sort_by(|a, b| a["file"].as_str().cmp(&b["file"].as_str()));
     faults
 }
@@ -600,16 +669,17 @@ fn baseline(top: &Path) -> Result<Option<Baseline>, Vec<Refusal>> {
 fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let top = top(repo)?;
     let (answer, tracked, config) = registered_at(&top)?;
-    let found = found(&top, &config, &tracked);
+    let seen = Read::at(&top, &config, &tracked)?;
+    let restated = seen.restated(&answer);
     let texts = read(&top, &answer)?;
     let docs = measured(&texts, &Tree::new(&tracked));
     let strays = strays(&top, &answer)?;
     let held = baseline(&top)?;
-    let found = found.as_ref();
-    let faults = faults(&answer, &docs, &strays, found, held.as_ref());
+    let found = seen.found.as_ref();
+    let faults = faults(&answer, &docs, &strays, (found, &restated), held.as_ref());
     let tighter = held
         .as_ref()
-        .is_some_and(|h| &ratcheted(&docs, &strays, found, Some(h)) != h);
+        .is_some_and(|h| &ratcheted(&docs, &strays, found, &restated, Some(h)) != h);
     let off = if found.is_none() {
         format!(
             "; the `local_ref` check is off: to turn it on, write `{} = [\"<name>\", ...]` in {CONFIG}, the names whose `<name>#<digits>` cites the local tracker (`docfit check --help`)",
@@ -655,8 +725,9 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let texts = read(&top, &answer)?;
     let strays = strays(&top, &answer)?;
     let docs = measured(&texts, &Tree::new(&files));
-    let found = found(&top, &adopting, &files);
-    let found = found.as_ref();
+    let seen = Read::at(&top, &adopting, &files)?;
+    let restated = seen.restated(&answer);
+    let found = seen.found.as_ref();
     let held = baseline(&top)?;
     let adopted = held.is_none();
     let mut next = match &held {
@@ -667,6 +738,7 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     if !refs::adopted(&next) {
         refs::ratchet(found, None, &mut next);
     }
+    restates::adopt(&restated, &mut next);
     let wrote_baseline = held.as_ref() != Some(&next);
     if wrote_baseline {
         write(&top.join(BASELINE), &(pretty(&json!(next)) + "\n"))?;
@@ -680,7 +752,7 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
         .filter(|_| adopted)
         .map(|s| json!({ "file": s.file, "size": s.bytes, "kinds": s.fault["kinds"], "fix": s.fault["fix"] }))
         .collect();
-    let faults = faults(&answer, &docs, &strays, found, Some(&next));
+    let faults = faults(&answer, &docs, &strays, (found, &restated), Some(&next));
     let changed = wrote_baseline || wrote_config;
     let then = match faults.first() {
         Some(first) => first["fix"].clone(),
@@ -711,12 +783,19 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
 fn ratchet(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let top = top(repo)?;
     let (answer, tracked, config) = registered_at(&top)?;
-    let found = found(&top, &config, &tracked);
+    let seen = Read::at(&top, &config, &tracked)?;
+    let restated = seen.restated(&answer);
     let texts = read(&top, &answer)?;
     let docs = measured(&texts, &Tree::new(&tracked));
     let held = baseline(&top)?;
     let strays = strays(&top, &answer)?;
-    let next = ratcheted(&docs, &strays, found.as_ref(), held.as_ref());
+    let next = ratcheted(
+        &docs,
+        &strays,
+        seen.found.as_ref(),
+        &restated,
+        held.as_ref(),
+    );
     let changed = held.as_ref() != Some(&next);
     if changed {
         write(&top.join(BASELINE), &(pretty(&json!(next)) + "\n"))?;
@@ -810,21 +889,18 @@ struct Seen {
     answer: Answer,
     tracked: Vec<String>,
     code: Vec<String>,
-    catalogs: Vec<String>,
+    read: Read,
     adrs: Vec<Adr>,
 }
 
 impl Seen {
     fn at(top: &Path) -> Result<Seen, Vec<Refusal>> {
         let (answer, tracked, config) = registered_at(top)?;
-        let code: Vec<String> = tracked
-            .iter()
-            .filter(|f| !f.ends_with(".md"))
-            .filter_map(|f| std::fs::read(top.join(f)).ok())
-            .filter(|bytes| !bytes.iter().take(8000).any(|b| *b == 0))
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        let code: Vec<String> = texts(top, tracked.iter().filter(|f| !f.ends_with(".md")))
+            .into_iter()
+            .map(|t| t.text)
             .collect();
-        let catalogs = catalogs(top, &config, &tracked)?;
+        let read = Read::at(top, &config, &tracked)?;
         let adrs = answer
             .documents
             .iter()
@@ -836,7 +912,7 @@ impl Seen {
             answer,
             tracked,
             code,
-            catalogs,
+            read,
             adrs,
         })
     }
@@ -844,21 +920,16 @@ impl Seen {
     /// `docfit where`'s answer on the document `name`, from the repo's top, of `text`.
     fn place(&self, name: &str, text: &str) -> Value {
         let paragraphs = paragraph::split(text);
-        let (spans, quoted) = paragraph::candidates(&paragraphs);
-        let (paths, others): (BTreeSet<String>, BTreeSet<String>) = spans
-            .into_iter()
-            .partition(|s| paragraph::is_path(s, &self.tracked));
-        let strings = quoted
-            .into_iter()
-            .filter(|q| {
-                let literal = serde_json::to_string(q).expect("a string");
-                self.catalogs.iter().any(|c| c.contains(&literal))
-            })
-            .collect();
+        let (paths, others): (BTreeSet<String>, BTreeSet<String>) =
+            paragraph::candidates(&paragraphs)
+                .into_iter()
+                .partition(|s| paragraph::is_path(s, &self.tracked));
+        let index = Index::new(&self.read.kept);
+        let restates = restates::find(name, text, &self.read.catalogs, &index);
         let known = Known {
             words: paragraph::words(others.iter().map(String::as_str), &self.code),
             paths,
-            strings,
+            restates: &restates,
             adrs: &self.adrs,
         };
         let placed: Vec<_> = paragraphs
@@ -884,8 +955,8 @@ impl Seen {
     }
 }
 
-/// The text of each tracked file `catalogs` matches; every glob must match one.
-fn catalogs(top: &Path, config: &Config, tracked: &[String]) -> Result<Vec<String>, Vec<Refusal>> {
+/// Each tracked file `catalogs` matches, with its text; every glob must match one.
+fn catalogs(top: &Path, config: &Config, tracked: &[String]) -> Result<Vec<Text>, Vec<Refusal>> {
     let (mut texts, mut refusals) = (Vec::new(), Vec::new());
     for glob in &config.catalogs {
         let files: Vec<&String> = tracked.iter().filter(|f| glob.is_match(f)).collect();
@@ -898,7 +969,10 @@ fn catalogs(top: &Path, config: &Config, tracked: &[String]) -> Result<Vec<Strin
         }
         for file in files {
             match tracked_text(top, file) {
-                Ok(text) => texts.push(text),
+                Ok(text) => texts.push(Text {
+                    path: file.clone(),
+                    text,
+                }),
                 Err(r) => refusals.push(r),
             }
         }
