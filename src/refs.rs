@@ -5,6 +5,7 @@
 
 use crate::budget::{Baseline, Held, Hold};
 use crate::tasks::Debt;
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -18,9 +19,10 @@ pub(crate) fn named(c: char) -> bool {
 }
 
 /// One local ref: the line (from 1) it is on, and the ref as written.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize)]
 pub(crate) struct Ref {
     pub(crate) line: usize,
+    #[serde(rename = "ref")]
     pub(crate) text: String,
 }
 
@@ -132,26 +134,19 @@ pub(crate) fn ratchet(found: Option<&Found>, held: Option<&Baseline>, next: &mut
 /// The `local-refs` debt: each file of `found` whose refs `baseline` holds,
 /// with every ref and its line.
 pub(crate) fn debt<'a>(found: &'a Found, baseline: &Baseline) -> Vec<Debt<'a>> {
-    let mut out = Vec::new();
-    for (file, refs) in found {
-        let held = held(baseline, file);
-        if held == 0 {
-            continue;
-        }
-        let each: Vec<Value> = refs
-            .iter()
-            .map(|r| json!({ "line": r.line, "ref": r.text }))
-            .collect();
-        out.push(Debt {
+    let held = |file: &str| Some(held(baseline, file)).filter(|h| *h > 0);
+    let debt = |(file, refs): (&'a String, &'a Vec<Ref>)| {
+        let held = held(file)?;
+        Some(Debt {
             file,
             summary: format!(
                 "`{file}` cites the local tracker {} times, held at {held}: replace each ref with what it points at, or delete it",
                 refs.len()
             ),
-            evidence: json!({ "refs": each, "held": held }),
-        });
-    }
-    out
+            evidence: json!({ "refs": refs, "held": held }),
+        })
+    };
+    found.iter().filter_map(debt).collect()
 }
 
 /// Whether `baseline` holds any file's refs: a repo whose baseline holds none

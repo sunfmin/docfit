@@ -8,6 +8,7 @@
 use crate::budget::{self, Baseline, Slot};
 use crate::paragraph::{self, Paragraph};
 use crate::tasks::Debt;
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 
@@ -23,16 +24,17 @@ pub(crate) struct Text {
 /// One restatement: the line (from 1) it starts on, the last line it is on,
 /// what it is (the string, or the run's first line), and where the repo
 /// already says it (the catalog, or `<file>:<line>`).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize)]
 pub(crate) struct Restated {
     pub(crate) line: usize,
     pub(crate) end: usize,
+    #[serde(rename = "found")]
     pub(crate) what: String,
     pub(crate) from: String,
 }
 
 /// What a document restates, each in line order.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Serialize)]
 pub(crate) struct Restates {
     pub(crate) strings: Vec<Restated>,
     pub(crate) copies: Vec<Restated>,
@@ -261,35 +263,16 @@ pub(crate) fn debt<'a>(found: &BTreeMap<&'a str, Restates>, baseline: &Baseline)
     let mut out = Vec::new();
     for (file, restates) in found {
         let held = Measure::ALL.map(|m| budget::held(baseline, file, m.slot()));
-        if !Measure::ALL
-            .iter()
-            .zip(held)
-            .any(|(m, held)| held > 0 && !m.of(restates).is_empty())
-        {
+        if held == [0, 0] || *restates == Restates::default() {
             continue;
         }
-        let mut evidence = json!({});
-        let mut counts = Vec::new();
-        for (m, held) in Measure::ALL.iter().zip(held) {
-            let each: Vec<Value> = m
-                .of(restates)
-                .iter()
-                .map(|r| match m {
-                    Measure::Strings => json!({ "line": r.line, "found": r.what, "from": r.from }),
-                    Measure::Copies => {
-                        json!({ "line": r.line, "end": r.end, "found": r.what, "from": r.from })
-                    }
-                })
-                .collect();
-            counts.push(format!("{} {}", each.len(), m.name()));
-            evidence[m.name()] = json!(each);
-            evidence["held"][m.name()] = json!(held);
-        }
+        let [strings, copies] = [&restates.strings, &restates.copies].map(Vec::len);
+        let mut evidence = json!(restates);
+        evidence["held"] = json!({ "strings": held[0], "copies": held[1] });
         out.push(Debt {
             file,
             summary: format!(
-                "`{file}` restates what the repo already says ({}): point at the one place, and delete the copy",
-                counts.join(", ")
+                "`{file}` restates what the repo already says ({strings} strings, {copies} copies): point at the one place, and delete the copy"
             ),
             evidence,
         });

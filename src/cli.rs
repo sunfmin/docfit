@@ -331,7 +331,7 @@ enum Cmd {
     ///   - `files`: the one file, from the repo's top.
     ///   - `steps`: how to pay it; the text `docfit help <kind>` prints, `docfit help rehome` for `rehome` and `over-budget`.
     ///   - `accept`: what holds it done: after `docfit ratchet`, `docfit check` exits {const:EXIT_OK} and `{const:BASELINE}` no longer holds the file in what the task pays (to rehome: gone or registered under a kind; over its budget: within it; a count: down to 0).
-    ///   - `evidence`: `held`, what the baseline holds it at, and what is found in it now: for `rehome` and `over-budget`, `size` (a file's bytes; a document's `bytes` and `paragraph`), for a document its `budget`, and `where`, `docfit where`'s answer on the file; for `local-refs`, `refs`, each `{"line", "ref"}`; for `restates`, `strings` (each `{"line", "found", "from"}`) and `copies` (each also with `end`), `held` a count of each; for `measurement`, `measurements`, each `{"line", "found"}`, `line` where its paragraph starts.
+    ///   - `evidence`: `held`, what the baseline holds it at, and what is found in it now: for `rehome` and `over-budget`, `size` (a file's bytes; a document's `bytes` and `paragraph`), for a document its `budget`, and `where`, `docfit where`'s answer on the file; for `local-refs`, `refs`, each `{"line", "ref"}`; for `restates`, `strings` and `copies`, each `{"line", "end", "found", "from"}`, `held` a count of each; for `measurement`, `measurements`, each `{"line", "found"}`, `line` where its paragraph starts.
     /// - `notes`: what was not looked for; without a baseline nothing is held, so there is no task.
     /// - `next`: do the first task by its steps, or that there is nothing to do.
     ///
@@ -876,14 +876,20 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
         ),
     };
     let counted = seen.read.counted(&seen.answer);
-    let debt = tasks::debt(
-        &docs,
-        &strays,
-        counted.refs,
-        &counted.restated,
-        &counted.measured,
-        &held,
-    );
+    let [rehome, over_budget] = tasks::debt(&docs, &strays, &held);
+    let debt = [
+        rehome,
+        over_budget,
+        (
+            Task::LocalRefs,
+            counted.refs.map_or_else(Vec::new, |f| refs::debt(f, &held)),
+        ),
+        (Task::Restates, restates::debt(&counted.restated, &held)),
+        (
+            Task::Measurement,
+            measurements::debt(&counted.measured, &held),
+        ),
+    ];
     let (mut tasks, mut counts) = (Vec::new(), serde_json::Map::new());
     for (task, debts) in debt {
         counts.insert(task.name().to_string(), json!(debts.len()));
