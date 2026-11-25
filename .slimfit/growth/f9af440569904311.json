@@ -1,0 +1,10 @@
+{
+  "tree": "fddcc213d07a12ff045e87321fe93d8179531f22+d1fba762150c532c",
+  "lines": 643,
+  "serves": "docfit#10",
+  "considered": "reused documents::config's reader for catalogs, documents' glob matcher, cli's read and refusal, the tests' throwaway-repo helpers (moved to tests/common); weighed shelling to git grep -w (dropped: 4.07 s vs 0.32 s on rollmind README) and a regex crate (hand scanners instead, no new dependency)",
+  "reviewer": "codex:01a2130d-f794-7da0-88e7-6ace0d4d59e6:default",
+  "author": "claude-code:c62e0c8d-e5bb-5a02-8de3-312ddf0e966e:opus",
+  "cut": "In src/paragraph.rs, use one enumerated, peekable line iterator in split so fence consumption and table lookahead share it without a line buffer or manual index, and reuse a borrowed leading-digit slice for list markers, issue references, and ADR numbers. In src/cli.rs, build the home counts and next-message fragments in one pass, and have read return a single Refusal for callers to aggregate. In src/documents.rs, deserialize catalogs as Vec<String> before compiling the globs to eliminate the separate type scan and filter_map.",
+  "answer": "made every cut: split walks one peekable enumerate iterator (no line buffer, no index); one digits() helper serves item, issues, Adr::read and named; homes and next built in one loop; read returns one Refusal; catalogs try_into Vec<String>. Net growth 667 -> 643 lines; tests and clippy green"
+}

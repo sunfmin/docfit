@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 pub(crate) const CONFIG: &str = "docfit.toml";
 /// The table of `docfit.toml` that maps a glob to a kind.
 pub(crate) const TABLE: &str = "documents";
+/// The key of `docfit.toml` that lists the globs of the repo's string catalogs.
+pub(crate) const CATALOGS: &str = "catalogs";
 
 /// One fault in `docfit.toml` that stops the check, and its fix.
 #[derive(serde::Serialize)]
@@ -27,6 +29,12 @@ pub(crate) struct Entry {
     kind: Kind,
     bytes: Option<usize>,
     line: Option<usize>,
+}
+
+/// `docfit.toml`, read: its entries, and the globs of its string catalogs.
+pub(crate) struct Config {
+    pub(crate) entries: Vec<Entry>,
+    pub(crate) catalogs: Vec<GlobMatcher>,
 }
 
 /// A registered document: its kind, and its budget.
@@ -61,8 +69,8 @@ struct Budgeted {
 /// How an entry is written, for a fix.
 const SHAPES: &str = "`\"<kind>\"` or `{ kind = \"<kind>\", bytes = <n>, line = <n> }`";
 
-/// `docfit.toml`'s entries.
-pub(crate) fn entries(config: &str) -> Result<Vec<Entry>, Vec<Refusal>> {
+/// `docfit.toml` read, every fault in it at once.
+pub(crate) fn config(config: &str) -> Result<Config, Vec<Refusal>> {
     let table: toml::Table = config.parse().map_err(|e: toml::de::Error| {
         vec![Refusal {
             fault: format!("{CONFIG} is not TOML: {}", e.message()),
@@ -78,6 +86,7 @@ pub(crate) fn entries(config: &str) -> Result<Vec<Entry>, Vec<Refusal>> {
         }]);
     };
     let (mut entries, mut refusals) = (Vec::new(), Vec::new());
+    let catalogs = catalogs(table.get(CATALOGS), &mut refusals);
     for (glob, value) in documents {
         let (kind, bytes, line) = match value.clone().try_into() {
             Ok(Entered::Kind(name)) => (name, None, None),
@@ -94,11 +103,7 @@ pub(crate) fn entries(config: &str) -> Result<Vec<Entry>, Vec<Refusal>> {
             }
         };
         let kind = Kind::named(&kind).ok_or(kind);
-        let matcher = GlobBuilder::new(glob)
-            .literal_separator(true)
-            .build()
-            .map(|g| g.compile_matcher());
-        match (kind, matcher) {
+        match (kind, matcher(glob)) {
             (Ok(kind), Ok(matcher)) => entries.push(Entry {
                 matcher,
                 kind,
@@ -116,10 +121,45 @@ pub(crate) fn entries(config: &str) -> Result<Vec<Entry>, Vec<Refusal>> {
         }
     }
     if refusals.is_empty() {
-        Ok(entries)
+        Ok(Config { entries, catalogs })
     } else {
         Err(refusals)
     }
+}
+
+/// A glob over paths from the repo's top: `*` and `?` within one directory.
+fn matcher(glob: &str) -> Result<GlobMatcher, globset::Error> {
+    GlobBuilder::new(glob)
+        .literal_separator(true)
+        .build()
+        .map(|g| g.compile_matcher())
+}
+
+/// The `catalogs` globs; none when the key is absent.
+fn catalogs(value: Option<&toml::Value>, refusals: &mut Vec<Refusal>) -> Vec<GlobMatcher> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    let Ok(globs) = value.clone().try_into::<Vec<String>>() else {
+        refusals.push(Refusal {
+            fault: format!("`{CATALOGS}` = `{value}` is not a list of globs"),
+            fix: format!(
+                "write `{CATALOGS} = [\"<glob>\", ...]` in {CONFIG}, a glob per string catalog"
+            ),
+        });
+        return Vec::new();
+    };
+    let mut matchers = Vec::new();
+    for glob in &globs {
+        match matcher(glob) {
+            Ok(m) => matchers.push(m),
+            Err(e) => refusals.push(Refusal {
+                fault: format!("`{glob}` in `{CATALOGS}` is not a glob: {}", e.kind()),
+                fix: format!("fix `{glob}` in {CONFIG}'s `{CATALOGS}`"),
+            }),
+        }
+    }
+    matchers
 }
 
 /// The check of `files`, the repo's tracked paths, against `entries`.
@@ -204,7 +244,7 @@ pub(crate) fn adopt(
     {
         text = format!("{}\n\n[{TABLE}]\n", text.trim_end());
     }
-    let answer = check(&entries(&text)?, files);
+    let answer = check(&self::config(&text)?.entries, files);
     let added: BTreeMap<String, Kind> = answer
         .faults
         .iter()

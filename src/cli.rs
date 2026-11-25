@@ -2,14 +2,16 @@
 //! pages, and what docfit exits with.
 
 use crate::budget::{self, BASELINE, Baseline, Measured, Size, Stray};
-use crate::documents::{self, Answer, CONFIG, Document, Refusal, TABLE};
+use crate::documents::{self, Answer, CATALOGS, CONFIG, Config, Document, Refusal, TABLE};
 use crate::kind::Kind;
+use crate::paragraph::{self, Adr, Home, Known};
 use crate::pointers::{self, Tree};
 use crate::repo;
 use crate::sentences;
 use agent_help::Help;
 use clap::{FromArgMatches, Parser, Subcommand};
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// The command finished and found nothing wrong.
@@ -250,6 +252,71 @@ enum Cmd {
         #[arg(long, verbatim_doc_comment)]
         repo: Option<PathBuf>,
     },
+    /// Lists a document by paragraph: what can be seen in each mechanically, and the home that suggests.
+    ///
+    /// ## When to run it
+    ///
+    /// Before moving a document's content to its homes, such as a README or a spec far over its budget: the facts are then in front of you, and only the judgement is left. It reads git and a few files, so it takes about a second.
+    ///
+    /// ## What it reads and writes
+    ///
+    /// It reads `<file>`, given from the current directory, and the repo it is in: `docfit.toml`, the paths git tracks, the text of every tracked file outside Markdown, the string catalogs, and the documents registered as `adr`. It writes nothing. `docfit.toml` may list the repo's string catalogs by glob, beside `[documents]`:
+    ///
+    /// ```toml
+    /// catalogs = ["App/**/*.xcstrings"]
+    /// ```
+    ///
+    /// A paragraph is a run of lines between blank lines; a list item and a table row are each one, and a fenced block is one in which nothing is read. A heading, a table's header and its separator are none. In each paragraph it sees:
+    ///
+    /// - `code`: the code spans, one word each, that are a path git tracks (a file or a directory) or that a tracked text file not ending `.md` holds as a whole word, as `git grep -w` finds it (a file with a NUL byte in its first 8000 is binary, and not read).
+    /// - `strings`: the strings quoted with `"…"`, `“…”`, `「…」` or `『…』` that a catalog holds verbatim as a quoted string.
+    /// - `evidence`: numbers with units (`1.5 s`, `63 MiB`, `70 分钟`).
+    /// - `local_refs`: references to the local tracker's issues (`#123`, `<checkout>#123`). Only this host can open them, so a repo's content never cites one.
+    /// - `decision`: a choice or a reason (`because`, `chose`, `choose`, `因为`, `选`) beside an alternative (`instead of`, `rather than`, `而不是`, `而非`); both, or none is seen.
+    /// - `pointer`: every sentence names where something is and little else: a link or a tracked path in a code span, a word saying where (`see`, `in`, `at`, `under`, `lives`, `见`, `在`, `位于`, `→`) unless the sentence is only those, and at most 8 other words (a CJK character counts a half).
+    ///
+    /// Its home is the first of these that applies:
+    ///
+    /// {const:HOMES}
+    ///
+    /// ## What it answers
+    ///
+    /// - `file`: the document, from the repo's top; `kind`: its kind, or null when `docfit.toml` registers it under none.
+    /// - `paragraphs`: in order, each with `line` (where it starts), `text` (its first 80 characters), `code` and `strings` (each `{"count", "found"}`, distinct, in order), `evidence`, `local_refs` and `decision` (lists), `pointer`, `home`, and, with home `adr`, `adr`: the ADR it names by number (`ADR 0002`, `adr/0002-…`) or title, or null for a new one.
+    /// - `homes`: how many paragraphs each home has.
+    /// - `next`: move each paragraph to its home, then `docfit check`.
+    ///
+    /// For example:
+    ///
+    /// ```json
+    /// {
+    ///   "file": "README.md",
+    ///   "kind": "readme",
+    ///   "paragraphs": [
+    ///     { "line": 3, "text": "Startup took 1.5 s (#12).", "code": { "count": 0, "found": [] }, "strings": { "count": 0, "found": [] }, "evidence": ["1.5 s"], "local_refs": ["#12"], "decision": [], "pointer": false, "home": "evidence" }
+    ///   ],
+    ///   "homes": { "keep": 0, "adr": 0, "delete": 0, "evidence": 1, "replace": 0, "judge": 0 },
+    ///   "next": "move each paragraph to its home (keep 0, adr 0, delete 0, evidence 1, replace 0, judge 0; `docfit where --help` says what each is), then run `docfit check`"
+    /// }
+    /// ```
+    ///
+    /// It exits {const:EXIT_OK}.
+    ///
+    /// ## What it may refuse
+    ///
+    /// It exits {const:EXIT_ERROR}, naming every fault at once, on a file it cannot read as UTF-8 text or that is in no git repository, on what `docfit check` refuses in `docfit.toml`, on a `catalogs` that is not a list of globs, on a glob in it that is not one or that matches no tracked file, and on a catalog or an ADR it cannot read.
+    ///
+    /// ## What trips you up
+    ///
+    /// - What is seen is mechanical: a home is a suggestion, and the features are there for you to judge it by. A paragraph holding several things shows them all, under the first home.
+    /// - A code span is looked for in every tracked file outside Markdown, so a common word (`next`) is found anywhere.
+    /// - Without `catalogs`, no string is found.
+    #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
+    Where {
+        /// The document, from the current directory.
+        #[arg(verbatim_doc_comment)]
+        file: PathBuf,
+    },
     /// Shows one topic of this manual, or all of it.
     ///
     /// `docfit help all` shows the whole manual.
@@ -264,6 +331,7 @@ enum Cmd {
 pub(crate) fn help() -> Help {
     Help::new(<Cli as clap::CommandFactory>::command())
         .constant("KINDS", Kind::table())
+        .constant("HOMES", Home::table())
         .constant("BASELINE", BASELINE)
         .constant("CONFIG", CONFIG)
         .constant("ADRS", pointers::ADRS)
@@ -293,6 +361,7 @@ pub(crate) fn run(args: impl IntoIterator<Item = std::ffi::OsString>) -> (String
         Cmd::Init { repo } => init(repo).unwrap_or_else(refused),
         Cmd::Ratchet { repo } => ratchet(repo).unwrap_or_else(refused),
         Cmd::Fmt { repo, files } => fmt(repo, files).unwrap_or_else(refused),
+        Cmd::Where { file } => place(&file).unwrap_or_else(refused),
         Cmd::Help { topic: None } => (help.index().expect("checked"), EXIT_OK),
         Cmd::Help { topic: Some(topic) } => match help.topic_help(&topic) {
             Ok(markdown) => (markdown, EXIT_OK),
@@ -323,16 +392,22 @@ fn config(top: &Path) -> Result<Option<String>, Vec<Refusal>> {
 /// The repo's top, its documents registered, and the paths git tracks.
 fn registered(repo: Option<PathBuf>) -> Result<(PathBuf, Answer, Vec<String>), Vec<Refusal>> {
     let top = top(repo)?;
-    let config = config(&top)?.ok_or_else(|| {
+    let (answer, tracked, _) = registered_at(&top)?;
+    Ok((top, answer, tracked))
+}
+
+/// The documents registered at `top`, the paths git tracks, and `docfit.toml` read.
+fn registered_at(top: &Path) -> Result<(Answer, Vec<String>, Config), Vec<Refusal>> {
+    let config = config(top)?.ok_or_else(|| {
         vec![refusal(
             &format!("there is no {CONFIG} at the repo's top"),
             &format!("run `docfit init`, or write {CONFIG} with a `[{TABLE}]` table, a line `\"<glob>\" = \"<kind>\"` per document (see `docfit check --help`)"),
         )]
     })?;
-    let entries = documents::entries(&config)?;
-    let tracked = repo::tracked(&top)?;
-    let answer = documents::check(&entries, &tracked);
-    Ok((top, answer, tracked))
+    let config = documents::config(&config)?;
+    let tracked = repo::tracked(top)?;
+    let answer = documents::check(&config.entries, &tracked);
+    Ok((answer, tracked, config))
 }
 
 /// The registered documents named in `files` (every one, when it names
@@ -363,12 +438,9 @@ fn read<'a>(
         .iter()
         .filter(|(f, _)| files.is_empty() || files.contains(f));
     for (file, doc) in named {
-        match std::fs::read_to_string(top.join(file)) {
+        match tracked_text(top, file) {
             Ok(text) => texts.push((file.as_str(), *doc, text)),
-            Err(e) => refusals.push(refusal(
-                &format!("cannot read `{file}`, which git tracks: {e}"),
-                &format!("restore `{file}` as UTF-8 text, or `git rm` it"),
-            )),
+            Err(r) => refusals.push(r),
         }
     }
     if refusals.is_empty() {
@@ -512,7 +584,7 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let config = config(&top)?;
     let files = repo::tracked(&top)?;
     let (text, added) = documents::adopt(config.as_deref(), &files)?;
-    let answer = documents::check(&documents::entries(&text)?, &files);
+    let answer = documents::check(&documents::config(&text)?.entries, &files);
     let texts = read(&top, &answer, &[])?;
     let strays = strays(&top, &answer)?;
     let (next, adopted) = match baseline(&top)? {
@@ -592,6 +664,119 @@ fn fmt(repo: Option<PathBuf>, files: Vec<String>) -> Result<(String, i32), Vec<R
         pretty(&json!({ "changed": !formatted.is_empty(), "formatted": formatted, "next": next })),
         EXIT_OK,
     ))
+}
+
+fn place(file: &Path) -> Result<(String, i32), Vec<Refusal>> {
+    let unreadable = |e: std::io::Error| {
+        vec![refusal(
+            &format!("cannot read `{}`: {e}", file.display()),
+            "give the path of a document in a git repository, from the current directory",
+        )]
+    };
+    let path = file.canonicalize().map_err(unreadable)?;
+    let text = std::fs::read_to_string(&path).map_err(unreadable)?;
+    let top = repo::top(path.parent().expect("a file is in a directory"))?;
+    let top = top.canonicalize().map_err(unreadable)?;
+    let name = path
+        .strip_prefix(&top)
+        .expect("git's top holds the file")
+        .to_string_lossy()
+        .into_owned();
+    let (answer, tracked, config) = registered_at(&top)?;
+    let paragraphs = paragraph::split(&text);
+    let (spans, quoted) = paragraph::candidates(&paragraphs);
+    let (paths, others): (BTreeSet<String>, BTreeSet<String>) = spans
+        .into_iter()
+        .partition(|s| paragraph::is_path(s, &tracked));
+    let code: Vec<String> = tracked
+        .iter()
+        .filter(|f| !f.ends_with(".md"))
+        .filter_map(|f| std::fs::read(top.join(f)).ok())
+        .filter(|bytes| !bytes.iter().take(8000).any(|b| *b == 0))
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .collect();
+    let catalogs = catalogs(&top, &config, &tracked)?;
+    let strings = quoted
+        .into_iter()
+        .filter(|q| {
+            let literal = serde_json::to_string(q).expect("a string");
+            catalogs.iter().any(|c| c.contains(&literal))
+        })
+        .collect();
+    let adrs = answer
+        .documents
+        .iter()
+        .filter(|(_, d)| d.kind == Kind::Adr)
+        .map(|(f, _)| tracked_text(&top, f).map(|text| Adr::read(f, &text)))
+        .collect::<Result<_, _>>()
+        .map_err(|r| vec![r])?;
+    let known = Known {
+        words: paragraph::words(others.iter().map(String::as_str), &code),
+        paths,
+        strings,
+        adrs,
+    };
+    let placed: Vec<_> = paragraphs
+        .iter()
+        .map(|p| paragraph::place(p, &known))
+        .collect();
+    let (mut homes, mut each) = (serde_json::Map::new(), Vec::new());
+    for home in Home::ALL {
+        let n = placed.iter().filter(|p| p.home == home).count();
+        homes.insert(home.name().to_string(), json!(n));
+        each.push(format!("{} {n}", home.name()));
+    }
+    let next = if placed.is_empty() {
+        format!("nothing to place: `{name}` has no paragraph")
+    } else {
+        format!(
+            "move each paragraph to its home ({}; `docfit where --help` says what each is), then run `docfit check`",
+            each.join(", ")
+        )
+    };
+    let kind = answer.documents.get(&name).map(|d| d.kind.name());
+    Ok((
+        pretty(
+            &json!({ "file": name, "kind": kind, "paragraphs": placed, "homes": homes, "next": next }),
+        ),
+        EXIT_OK,
+    ))
+}
+
+/// The text of each tracked file `catalogs` matches; every glob must match one.
+fn catalogs(top: &Path, config: &Config, tracked: &[String]) -> Result<Vec<String>, Vec<Refusal>> {
+    let (mut texts, mut refusals) = (Vec::new(), Vec::new());
+    for glob in &config.catalogs {
+        let files: Vec<&String> = tracked.iter().filter(|f| glob.is_match(f)).collect();
+        if files.is_empty() {
+            let glob = glob.glob().glob();
+            refusals.push(refusal(
+                &format!("`{glob}` in {CONFIG}'s `{CATALOGS}` matches no file git tracks"),
+                &format!("fix `{glob}` to match the repo's string catalogs, or take it out of `{CATALOGS}`"),
+            ));
+        }
+        for file in files {
+            match tracked_text(top, file) {
+                Ok(text) => texts.push(text),
+                Err(r) => refusals.push(r),
+            }
+        }
+    }
+    if refusals.is_empty() {
+        Ok(texts)
+    } else {
+        Err(refusals)
+    }
+}
+
+/// A tracked file's text.
+fn tracked_text(top: &Path, file: &str) -> Result<String, Refusal> {
+    std::fs::read_to_string(top.join(file)).map_err(|e| {
+        refusal(
+            &format!("cannot read `{file}`, which git tracks: {e}"),
+            &format!("restore `{file}` as UTF-8 text, or `git rm` it"),
+        )
+    })
 }
 
 /// `text` written to `path` whole or not at all: a temp file beside it, renamed over it.

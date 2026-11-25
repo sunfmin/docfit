@@ -1,0 +1,39 @@
+{
+  "tree": "8130d44a77086718fca4eb93b5db5ca17e632f35+d1fba762150c532c",
+  "picker": "codex:01a21310-bc84-7242-a014-fa455a266d6b:default",
+  "author": "claude-code:c62e0c8d-e5bb-5a02-8de3-312ddf0e966e:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/paragraph.rs:470:26: replace || with && in decision",
+        "why": "A paragraph with only a reason or only an alternative would be sent to an ADR. The fixture pairs both markers.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/paragraph.rs:580:41: replace >= with < in named",
+        "why": "A paragraph naming an ADR by a title of six or more characters would lose its match. The fixture refers to the ADR by number.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/paragraph.rs:210:15: replace > with < in item",
+        "why": "Consecutive numbered list items would merge into one paragraph. The fixture uses unordered bullets.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/paragraph.rs:342:26: replace && with || in quoted",
+        "why": "A catalog match longer than 100 characters would count as a string. The fixture only contains short catalog matches.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/paragraph.rs:300:18: replace < with > in excerpt",
+        "why": "Truncated excerpts would lose their ellipsis. The text assertion checks only the opening words.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}
