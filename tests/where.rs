@@ -241,3 +241,33 @@ fn a_catalog_or_an_adr_it_cannot_read_is_refused_with_its_fix() {
         );
     }
 }
+
+#[test]
+fn the_edges_of_each_feature() {
+    let dir = fixture();
+    let long = "x".repeat(101);
+    let catalog = format!(r#"{{ "a": "{long}", "b": "Cancel" }}"#);
+    std::fs::write(dir.path().join("App/Base/Localizable.xcstrings"), catalog).unwrap();
+    let spec = format!(
+        "Only a reason, because it is so.\n\nOnly an alternative, instead of that.\n\nWe chose them instead of others because of globs for documents, as decided.\n\n1. first\n2. second\n\nA catalog string past 100 characters is not one: \"{long}\", but \"Cancel\" is.\n\nShort.\n"
+    );
+    std::fs::write(dir.path().join("SPEC.md"), spec).unwrap();
+    let (code, answer) = docfit(dir.path(), &["where", "SPEC.md"]);
+    assert_eq!(code, 0, "{answer}");
+    let p = paragraphs(&answer);
+    assert_eq!(p.len(), 7, "{answer}");
+    assert_eq!(p[0]["decision"], json!([]));
+    assert_eq!(p[1]["decision"], json!([]));
+    assert_eq!(
+        p[2]["adr"], "docs/adr/0002-globs-for-documents.md",
+        "by its title"
+    );
+    assert_eq!(
+        (p[3]["text"].clone(), p[4]["text"].clone()),
+        (json!("1. first"), json!("2. second"))
+    );
+    assert_eq!(p[5]["strings"], json!({ "count": 1, "found": ["Cancel"] }));
+    assert!(p[5]["text"].as_str().unwrap().ends_with('…'), "{answer}");
+    assert_eq!(p[5]["text"].as_str().unwrap().chars().count(), 81);
+    assert_eq!(p[6]["text"], "Short.");
+}
