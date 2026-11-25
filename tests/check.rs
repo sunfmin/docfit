@@ -905,21 +905,27 @@ fn a_docfit_toml_it_cannot_read_is_refused_with_its_fix() {
 }
 
 #[test]
-fn init_holds_the_broken_pointers_present_and_formats_the_prose_so_check_is_green_that_day() {
+fn init_holds_the_broken_pointers_present_so_check_is_green_on_them_that_day() {
     let readme = "# r\n\nSee `docs/gone.md`. Then read on.\n";
     let dir = repo(&[("README.md", readme), ("src/main.rs", "fn main() {}\n")]);
     let (code, answer) = docfit(dir.path(), &["init"]);
     assert_eq!(code, 0, "{answer}");
-    assert_eq!(answer["faults"], serde_json::json!([]), "{answer}");
-    assert_eq!(answer["formatted"], serde_json::json!(["README.md"]));
+    let faults: Vec<_> = answer["faults"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| &f["fault"])
+        .collect();
     assert_eq!(
-        std::fs::read_to_string(dir.path().join("README.md")).unwrap(),
-        "# r\n\nSee `docs/gone.md`.\nThen read on.\n"
+        faults,
+        ["unformatted"],
+        "the pointer is held, the prose left as it is: {answer}"
     );
     assert_eq!(
         baseline(dir.path()),
         serde_json::json!({ "README.md": { "pointers": ["docs/gone.md"] } })
     );
+    std::fs::write(dir.path().join("README.md"), "# r\n\nSee `docs/gone.md`.\n").unwrap();
     let (code, checked) = check(dir.path());
     assert_eq!(code, 0, "{checked}");
 

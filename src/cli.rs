@@ -129,7 +129,7 @@ enum Cmd {
         #[arg(long, verbatim_doc_comment)]
         repo: Option<PathBuf>,
     },
-    /// Adopts docfit on a repo in one command: registers each Markdown file by the kind its place says, holds the rest to rehome, formats the documents, and writes the baseline at today's sizes and broken pointers, so `docfit check` is green that day.
+    /// Adopts docfit on a repo in one command: registers each Markdown file by the kind its place says, holds the rest to rehome, and writes the baseline at today's sizes and broken pointers, so `docfit check` is green that day.
     ///
     /// ## When to run it
     ///
@@ -137,13 +137,12 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads what `docfit check` reads; without a `{const:CONFIG}` it starts one. It adds a line `"<path>" = "<kind>"` to the `[documents]` table for each Markdown file git tracks that no glob matches and whose place says its kind: `README.md` is `readme`; `CLAUDE.md`, `AGENTS.md` and a file in `docs/agents/` are `agent`; a file in `adr/` (such as `docs/adr/`) is `adr`; `GLOSSARY.md` is `glossary`. Every line already in `{const:CONFIG}`, and its comments, are kept as they are. Without a baseline yet, it first formats every registered document as `docfit fmt` does, then writes `{const:BASELINE}` as `docfit ratchet` does on a repo without one: each document over its budget held at its size now, formatted, each pointer broken now held in its document, and each Markdown file registered under no kind held to rehome at its size now. With a baseline, it leaves it as it is: once a repo has adopted docfit, its baseline only tightens. Each file is written whole, through a file beside it renamed over it, and only when it changes.
+    /// It reads what `docfit check` reads; without a `{const:CONFIG}` it starts one. It adds a line `"<path>" = "<kind>"` to the `[documents]` table for each Markdown file git tracks that no glob matches and whose place says its kind: `README.md` is `readme`; `CLAUDE.md`, `AGENTS.md` and a file in `docs/agents/` are `agent`; a file in `adr/` (such as `docs/adr/`) is `adr`; `GLOSSARY.md` is `glossary`. Every line already in `{const:CONFIG}`, and its comments, are kept as they are. Without a baseline yet, it writes `{const:BASELINE}` as `docfit ratchet` does on a repo without one: each document over its budget held at its size now, each pointer broken now held in its document, and each Markdown file registered under no kind held to rehome at its size now. With a baseline, it leaves it as it is: once a repo has adopted docfit, its baseline only tightens. Each file is written whole, through a file beside it renamed over it, and only when it changes.
     ///
     /// ## What it answers
     ///
     /// - `registered`: each file it registered this run, with its kind. Empty on a run that adds none.
     /// - `rehome`: each file it held to rehome this run: `file`, `size` (its bytes), `kinds` (every kind, since its place says none) and `fix`, the line that registers it under a kind instead. docfit does not guess its kind.
-    /// - `formatted`: each document it formatted this run, as `docfit fmt` answers it. Empty on a repo that has a baseline: it formats only when it adopts.
     /// - `faults`: what `docfit check` would answer now, as it answers it; empty on a repo it adopted this run.
     /// - `baseline`: the baseline now.
     /// - `changed`: whether it wrote `{const:CONFIG}` or the baseline. `false` is nothing to adopt.
@@ -157,7 +156,6 @@ enum Cmd {
     ///   "rehome": [
     ///     { "file": "SPEC.md", "size": 15360, "kinds": ["readme", "agent", "adr", "glossary", "design-note"], "fix": "add `\"SPEC.md\" = \"<kind>\"` under `[documents]` in docfit.toml, <kind> one of readme, agent, adr, glossary, design-note" }
     ///   ],
-    ///   "formatted": ["README.md"],
     ///   "faults": [],
     ///   "baseline": { "README.md": { "bytes": 65536, "pointers": ["docs/old.md"] }, "SPEC.md": { "rehome": 15360 } },
     ///   "changed": true,
@@ -175,7 +173,6 @@ enum Cmd {
     ///
     /// - A file held to rehome is not a document, so not measured against a budget: registered later under a kind and over its budget, `docfit check` is red on it until it is cut.
     /// - On a repo that has a baseline, a Markdown file added since and registered under no kind is not held to rehome: `docfit check` is red on it until it is registered.
-    /// - It rewrites documents that hold more than one sentence on a line: review that diff with the rest. It formats before it measures, so a document's budget is held at its formatted size, and `docfit fmt` after it does not push one over.
     #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
     Init {
         /// The repository to adopt docfit on (default: the one containing the current directory).
@@ -515,22 +512,10 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let files = repo::tracked(&top)?;
     let (text, added) = documents::adopt(config.as_deref(), &files)?;
     let answer = documents::check(&documents::entries(&text)?, &files);
-    let mut texts = read(&top, &answer, &[])?;
+    let texts = read(&top, &answer, &[])?;
     let strays = strays(&top, &answer)?;
-    let tree = Tree::new(&files);
-    let held = baseline(&top)?;
-    let mut formatted = Vec::new();
-    if held.is_none() {
-        for (file, _, text) in texts.iter_mut() {
-            if let (new, Some(_)) = sentences::format(text) {
-                write(&top.join(*file), &new)?;
-                *text = new;
-                formatted.push(*file);
-            }
-        }
-    }
-    let docs = measured(&texts, &tree);
-    let (next, adopted) = match held {
+    let docs = measured(&texts, &Tree::new(&files));
+    let (next, adopted) = match baseline(&top)? {
         Some(held) => (held, false),
         None => {
             let next = budget::ratchet(&docs, &strays, None);
@@ -560,7 +545,7 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
         added.iter().map(|(f, k)| (f, k.name())).collect();
     Ok((
         pretty(&json!({
-            "registered": registered, "rehome": rehome, "formatted": formatted, "faults": faults, "baseline": next,
+            "registered": registered, "rehome": rehome, "faults": faults, "baseline": next,
             "changed": changed, "next": then,
         })),
         EXIT_OK,
