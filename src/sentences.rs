@@ -185,18 +185,14 @@ fn sentences(rest: &str) -> Vec<&str> {
 }
 
 /// The number (from 1) of the first line `format` changes in `text`, if it
-/// changes one.
+/// changes one: `format` only breaks lines, so a changed line is one that
+/// differs from its formatted line.
 pub(crate) fn first_unformatted(text: &str) -> Option<usize> {
     let formatted = format(text);
-    if formatted == text {
-        return None;
-    }
-    let mismatch = text
-        .lines()
+    text.lines()
         .zip(formatted.lines())
         .position(|(a, b)| a != b)
-        .unwrap_or_else(|| text.lines().count().min(formatted.lines().count()));
-    Some(mismatch + 1)
+        .map(|n| n + 1)
 }
 
 #[cfg(test)]
