@@ -63,9 +63,8 @@ pub(crate) fn ratchet(found: &Found, held: Option<&Baseline>, next: &mut Baselin
             .entry(file.to_string())
             .or_insert_with(|| Held::Over(Hold::default()));
         // A document is never a file to rehome, which no kind registers.
-        if let Held::Over(h) = entry {
-            h.measurements = Some(count);
-        }
+        let Held::Over(h) = entry else { continue };
+        h.measurements = Some(count);
     }
 }
 
