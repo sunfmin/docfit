@@ -4,7 +4,7 @@ fast = "./gate.sh"
 fast_limit = 300
 slow = "./gate.sh"
 slow_limit = 300
-regenerated = [".slimfit/baseline.json"]
+regenerated = [".slimfit/baseline.json", ".docfit/baseline.json"]
 
 [cut]
 steps = ["packaging/release.sh cut $FACTORIUM_VERSION"]
@@ -13,6 +13,6 @@ formula = "sunfmin/tap/docfit"
 limit = 2700
 
 [idle]
-tasks = "slimfit --version && truefit --version && slimfit next --all --sample 5 && truefit next --all"
+tasks = "slimfit --version && truefit --version && docfit --version && slimfit next --all --sample 5 && truefit next --all && docfit next --all"
 every = 86400
 limit = 1800

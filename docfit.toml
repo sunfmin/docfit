@@ -1,4 +1,7 @@
 # docfit's own documents, each under its kind (`docfit check --help`); the gate runs `docfit check` on them.
+# local_issue_refs: the checkouts `factorium checkout list` showed on this host when docfit was wired in.
+local_issue_refs = ["chessmirror", "docfit", "factorium", "factum", "horizon-labs", "lore", "rolesmith", "rollmind", "sesame", "slimfit", "stablehand", "truefit"]
+
 [documents]
 "README.md" = "readme"
 "CLAUDE.md" = "agent"
