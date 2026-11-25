@@ -516,7 +516,7 @@ fn at(file: &str, line: u64, missing: &str) -> (String, u64, String) {
 #[test]
 fn a_backticked_path_that_exists_is_green_and_one_that_does_not_red() {
     let readme = "Run `src/main.rs:1`, see `docs/agents/`, `docfit.toml` and `docs/adr`.\n\
-        Not paths: `docfit --help`, `*.md`, `<dir>/x`, `~/a/b`, `/usr/bin`, `.md`, `Kind::ALL`, `a.b`, `src/main.rs:x`.\n\
+        Not paths: `docfit --help`, `*.md`, `<dir>/x`, `~/a/b`, `/usr/bin`, `.md`, `Kind::ALL`, `a.b`, `nowhere.md:x`.\n\
         Gone: `src/gone.rs` and `notes.toml`.\n";
     assert_eq!(
         broken(
