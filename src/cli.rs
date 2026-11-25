@@ -165,7 +165,8 @@ enum Cmd {
     ///
     /// - `code`: the code spans, one word each, that are a path git tracks (a file or a directory) or that a tracked text file not ending `.md` holds as a whole word, as `git grep -w` finds it (a file with a NUL byte in its first 8000 is binary, and not read).
     /// - `strings`: the strings quoted with `"…"`, `“…”`, `「…」` or `『…』` that a catalog holds verbatim as a quoted string.
-    /// - `evidence`: issue references (`#123`, `<checkout>#123`), and numbers with units (`1.5 s`, `63 MiB`, `70 分钟`).
+    /// - `evidence`: numbers with units (`1.5 s`, `63 MiB`, `70 分钟`).
+    /// - `local_refs`: references to the local tracker's issues (`#123`, `<checkout>#123`). Only this host can open them, so a repo's content never cites one.
     /// - `decision`: a choice or a reason (`because`, `chose`, `choose`, `因为`, `选`) beside an alternative (`instead of`, `rather than`, `而不是`, `而非`); both, or none is seen.
     /// - `pointer`: every sentence names where something is and little else: a link or a tracked path in a code span, a word saying where (`see`, `in`, `at`, `under`, `lives`, `见`, `在`, `位于`, `→`) unless the sentence is only those, and at most 8 other words (a CJK character counts a half).
     ///
@@ -176,7 +177,7 @@ enum Cmd {
     /// ## What it answers
     ///
     /// - `file`: the document, from the repo's top; `kind`: its kind, or null when `docfit.toml` registers it under none.
-    /// - `paragraphs`: in order, each with `line` (where it starts), `text` (its first 80 characters), `code` and `strings` (each `{"count", "found"}`, distinct, in order), `evidence` and `decision` (lists), `pointer`, `home`, and, with home `adr`, `adr`: the ADR it names by number (`ADR 0002`, `adr/0002-…`) or title, or null for a new one.
+    /// - `paragraphs`: in order, each with `line` (where it starts), `text` (its first 80 characters), `code` and `strings` (each `{"count", "found"}`, distinct, in order), `evidence`, `local_refs` and `decision` (lists), `pointer`, `home`, and, with home `adr`, `adr`: the ADR it names by number (`ADR 0002`, `adr/0002-…`) or title, or null for a new one.
     /// - `homes`: how many paragraphs each home has.
     /// - `next`: move each paragraph to its home, then `docfit check`.
     ///
@@ -187,10 +188,10 @@ enum Cmd {
     ///   "file": "README.md",
     ///   "kind": "readme",
     ///   "paragraphs": [
-    ///     { "line": 3, "text": "Startup took 1.5 s (#12).", "code": { "count": 0, "found": [] }, "strings": { "count": 0, "found": [] }, "evidence": ["#12", "1.5 s"], "decision": [], "pointer": false, "home": "issue" }
+    ///     { "line": 3, "text": "Startup took 1.5 s (#12).", "code": { "count": 0, "found": [] }, "strings": { "count": 0, "found": [] }, "evidence": ["1.5 s"], "local_refs": ["#12"], "decision": [], "pointer": false, "home": "evidence" }
     ///   ],
-    ///   "homes": { "adr": 0, "delete": 0, "issue": 1, "judge": 0, "keep": 0 },
-    ///   "next": "move each paragraph to its home (keep 0, adr 0, delete 0, issue 1, judge 0; `docfit where --help` says what each is), then run `docfit check`"
+    ///   "homes": { "keep": 0, "adr": 0, "delete": 0, "evidence": 1, "replace": 0, "judge": 0 },
+    ///   "next": "move each paragraph to its home (keep 0, adr 0, delete 0, evidence 1, replace 0, judge 0; `docfit where --help` says what each is), then run `docfit check`"
     /// }
     /// ```
     ///

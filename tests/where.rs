@@ -92,11 +92,9 @@ fn each_paragraph_gets_its_features_and_its_suggested_home() {
     );
     assert_eq!(p[1]["home"], "delete");
 
-    assert_eq!(
-        p[2]["evidence"],
-        json!(["#12", "rollmind#146", "1.5 s", "63 MiB", "70 分钟"])
-    );
-    assert_eq!(p[2]["home"], "issue");
+    assert_eq!(p[2]["evidence"], json!(["1.5 s", "63 MiB", "70 分钟"]));
+    assert_eq!(p[2]["local_refs"], json!(["#12", "rollmind#146"]));
+    assert_eq!(p[2]["home"], "evidence");
 
     assert_eq!(p[3]["decision"], json!(["because", "instead of"]));
     assert_eq!(p[3]["home"], "adr");
@@ -108,7 +106,7 @@ fn each_paragraph_gets_its_features_and_its_suggested_home() {
     assert_eq!(p[5]["home"], "keep");
 
     assert_eq!(p[6]["home"], "judge");
-    for feature in ["evidence", "decision"] {
+    for feature in ["evidence", "local_refs", "decision"] {
         assert_eq!(p[6][feature], json!([]), "{feature}");
     }
     assert_eq!(p[6]["code"], json!({ "count": 0, "found": [] }));
@@ -119,13 +117,14 @@ fn each_paragraph_gets_its_features_and_its_suggested_home() {
     assert_eq!(p[8]["decision"], json!(["因为", "选", "而不是"]));
     // A table row is one paragraph; its header and separator are not.
     assert_eq!(p[9]["evidence"], json!(["3 ms"]));
+    assert_eq!(p[9]["home"], "evidence");
     // A fenced block is one paragraph, nothing read inside it.
     assert_eq!(p[10]["home"], "judge");
     assert_eq!(p[10]["strings"]["count"], 0);
 
     assert_eq!(
         answer["homes"],
-        json!({ "delete": 3, "issue": 2, "adr": 3, "keep": 1, "judge": 2 })
+        json!({ "keep": 1, "adr": 3, "delete": 3, "evidence": 2, "replace": 0, "judge": 2 })
     );
     assert!(answer["next"].as_str().unwrap().contains("docfit check"));
 }
@@ -249,13 +248,13 @@ fn the_edges_of_each_feature() {
     let catalog = format!(r#"{{ "a": "{long}", "b": "Cancel" }}"#);
     std::fs::write(dir.path().join("App/Base/Localizable.xcstrings"), catalog).unwrap();
     let spec = format!(
-        "Only a reason, because it is so.\n\nOnly an alternative, instead of that.\n\nWe chose them instead of others because of globs for documents, as decided.\n\n1. first\n2. second\n\nA catalog string past 100 characters is not one: \"{long}\", but \"Cancel\" is.\n\nShort.\n"
+        "Only a reason, because it is so.\n\nOnly an alternative, instead of that.\n\nWe chose them instead of others because of globs for documents, as decided.\n\n1. first\n2. second\n\nA catalog string past 100 characters is not one: \"{long}\", but \"Cancel\" is.\n\nShort.\n\nFixed in rollmind#7, as #8 says.\n"
     );
     std::fs::write(dir.path().join("SPEC.md"), spec).unwrap();
     let (code, answer) = docfit(dir.path(), &["where", "SPEC.md"]);
     assert_eq!(code, 0, "{answer}");
     let p = paragraphs(&answer);
-    assert_eq!(p.len(), 7, "{answer}");
+    assert_eq!(p.len(), 8, "{answer}");
     assert_eq!(p[0]["decision"], json!([]));
     assert_eq!(p[1]["decision"], json!([]));
     assert_eq!(
@@ -270,4 +269,8 @@ fn the_edges_of_each_feature() {
     assert!(p[5]["text"].as_str().unwrap().ends_with('…'), "{answer}");
     assert_eq!(p[5]["text"].as_str().unwrap().chars().count(), 81);
     assert_eq!(p[6]["text"], "Short.");
+    // An issue of the local tracker is its own feature: what it points at replaces it.
+    assert_eq!(p[7]["local_refs"], json!(["rollmind#7", "#8"]));
+    assert_eq!(p[7]["evidence"], json!([]));
+    assert_eq!(p[7]["home"], "replace");
 }

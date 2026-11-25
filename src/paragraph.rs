@@ -18,20 +18,22 @@ pub(crate) struct Paragraph {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum Home {
-    Delete,
-    Issue,
-    Adr,
     Keep,
+    Adr,
+    Delete,
+    Evidence,
+    Replace,
     Judge,
 }
 
 impl Home {
     /// In the order a paragraph's home is chosen: the first that applies.
-    pub(crate) const ALL: [Home; 5] = [
+    pub(crate) const ALL: [Home; 6] = [
         Home::Keep,
         Home::Adr,
         Home::Delete,
-        Home::Issue,
+        Home::Evidence,
+        Home::Replace,
         Home::Judge,
     ];
 
@@ -54,10 +56,15 @@ impl Home {
                 "`code` or `strings`",
                 "delete it: the code, the catalog and the screen tests are its home",
             ),
-            Home::Issue => (
-                "issue",
+            Home::Evidence => (
+                "evidence",
                 "`evidence`",
-                "move it to a comment on the issue it came from",
+                "move it to the ADR of the decision beside it, with the command that measures it, if there is one; else to a comment on the issue it came from",
+            ),
+            Home::Replace => (
+                "replace",
+                "`local_refs`",
+                "replace each reference with what it points at: the person's words with who, date and where; or the command and the number it printed. Only this host can open the local tracker",
             ),
             Home::Judge => ("judge", "none of these", "for the agent to judge"),
         }
@@ -146,6 +153,7 @@ pub(crate) struct Placed {
     code: Found,
     strings: Found,
     evidence: Vec<String>,
+    local_refs: Vec<String>,
     decision: Vec<&'static str>,
     pointer: bool,
     pub(crate) home: Home,
@@ -256,7 +264,8 @@ pub(crate) fn is_path(token: &str, tracked: &[String]) -> bool {
 
 /// `p` placed against what the repo holds. The home is the first that
 /// applies: a pointer is kept, a decision goes to an ADR, code or strings
-/// are deleted, evidence goes to an issue, and the rest is for the agent.
+/// are deleted, evidence goes to an ADR or an issue's comment, a local
+/// tracker's reference is replaced, and the rest is for the agent.
 pub(crate) fn place(p: &Paragraph, known: &Known) -> Placed {
     let read = if p.fenced { "" } else { &p.text };
     let prose = prose(read);
@@ -264,8 +273,7 @@ pub(crate) fn place(p: &Paragraph, known: &Known) -> Placed {
         known.paths.contains(t) || known.words.contains(t)
     });
     let strings = Found::of(quoted(&prose).into_iter(), |s| known.strings.contains(s));
-    let mut evidence = issues(&prose);
-    evidence.extend(measures(&prose));
+    let (evidence, local_refs) = (measures(&prose), issues(&prose));
     let decision = decision(&prose);
     let pointer = pointer(read, &known.paths);
     let home = if pointer {
@@ -275,7 +283,9 @@ pub(crate) fn place(p: &Paragraph, known: &Known) -> Placed {
     } else if code.count + strings.count > 0 {
         Home::Delete
     } else if !evidence.is_empty() {
-        Home::Issue
+        Home::Evidence
+    } else if !local_refs.is_empty() {
+        Home::Replace
     } else {
         Home::Judge
     };
@@ -286,6 +296,7 @@ pub(crate) fn place(p: &Paragraph, known: &Known) -> Placed {
         code,
         strings,
         evidence,
+        local_refs,
         decision,
         pointer,
         home,
@@ -347,7 +358,7 @@ fn quoted(prose: &str) -> Vec<String> {
     out
 }
 
-/// Issue references: `#123`, and `<checkout>#123`.
+/// References to the local tracker's issues: `#123`, and `<checkout>#123`.
 fn issues(prose: &str) -> Vec<String> {
     let name = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
     let mut out = Vec::new();
