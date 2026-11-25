@@ -137,21 +137,20 @@ fn matcher(glob: &str) -> Result<GlobMatcher, globset::Error> {
 
 /// The `catalogs` globs; none when the key is absent.
 fn catalogs(value: Option<&toml::Value>, refusals: &mut Vec<Refusal>) -> Vec<GlobMatcher> {
-    let globs = match value {
-        None => return Vec::new(),
-        Some(toml::Value::Array(globs)) if globs.iter().all(toml::Value::is_str) => globs,
-        Some(other) => {
-            refusals.push(Refusal {
-                fault: format!("`{CATALOGS}` = `{other}` is not a list of globs"),
-                fix: format!(
-                    "write `{CATALOGS} = [\"<glob>\", ...]` in {CONFIG}, a glob per string catalog"
-                ),
-            });
-            return Vec::new();
-        }
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    let Ok(globs) = value.clone().try_into::<Vec<String>>() else {
+        refusals.push(Refusal {
+            fault: format!("`{CATALOGS}` = `{value}` is not a list of globs"),
+            fix: format!(
+                "write `{CATALOGS} = [\"<glob>\", ...]` in {CONFIG}, a glob per string catalog"
+            ),
+        });
+        return Vec::new();
     };
     let mut matchers = Vec::new();
-    for glob in globs.iter().filter_map(toml::Value::as_str) {
+    for glob in &globs {
         match matcher(glob) {
             Ok(m) => matchers.push(m),
             Err(e) => refusals.push(Refusal {

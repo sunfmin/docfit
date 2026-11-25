@@ -296,7 +296,7 @@ fn measured<'a>(top: &Path, answer: &'a Answer) -> Result<Vec<Measured<'a>>, Vec
                     at,
                 });
             }
-            Err(r) => refusals.extend(r),
+            Err(r) => refusals.push(r),
         }
     }
     if refusals.is_empty() {
@@ -423,7 +423,8 @@ fn place(file: &Path) -> Result<(String, i32), Vec<Refusal>> {
         .iter()
         .filter(|(_, d)| d.kind == Kind::Adr)
         .map(|(f, _)| read(&top, f).map(|text| Adr::read(f, &text)))
-        .collect::<Result<_, _>>()?;
+        .collect::<Result<_, _>>()
+        .map_err(|r| vec![r])?;
     let known = Known {
         words: paragraph::words(others.iter().map(String::as_str), &code),
         paths,
@@ -434,18 +435,15 @@ fn place(file: &Path) -> Result<(String, i32), Vec<Refusal>> {
         .iter()
         .map(|p| paragraph::place(p, &known))
         .collect();
-    let count = |h: Home| placed.iter().filter(|p| p.home == h).count();
-    let homes: serde_json::Map<String, Value> = Home::ALL
-        .iter()
-        .map(|h| (h.name().to_string(), json!(count(*h))))
-        .collect();
+    let (mut homes, mut each) = (serde_json::Map::new(), Vec::new());
+    for home in Home::ALL {
+        let n = placed.iter().filter(|p| p.home == home).count();
+        homes.insert(home.name().to_string(), json!(n));
+        each.push(format!("{} {n}", home.name()));
+    }
     let next = if placed.is_empty() {
         format!("nothing to place: `{name}` has no paragraph")
     } else {
-        let each: Vec<String> = Home::ALL
-            .iter()
-            .map(|h| format!("{} {}", h.name(), count(*h)))
-            .collect();
         format!(
             "move each paragraph to its home ({}; `docfit where --help` says what each is), then run `docfit check`",
             each.join(", ")
@@ -475,7 +473,7 @@ fn catalogs(top: &Path, config: &Config, tracked: &[String]) -> Result<Vec<Strin
         for file in files {
             match read(top, file) {
                 Ok(text) => texts.push(text),
-                Err(r) => refusals.extend(r),
+                Err(r) => refusals.push(r),
             }
         }
     }
@@ -487,12 +485,12 @@ fn catalogs(top: &Path, config: &Config, tracked: &[String]) -> Result<Vec<Strin
 }
 
 /// A tracked file's text.
-fn read(top: &Path, file: &str) -> Result<String, Vec<Refusal>> {
+fn read(top: &Path, file: &str) -> Result<String, Refusal> {
     std::fs::read_to_string(top.join(file)).map_err(|e| {
-        vec![refusal(
+        refusal(
             &format!("cannot read `{file}`, which git tracks: {e}"),
             &format!("restore `{file}` as UTF-8 text, or `git rm` it"),
-        )]
+        )
     })
 }
 

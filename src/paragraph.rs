@@ -90,7 +90,7 @@ impl Adr {
     /// The ADR at `path`, its title its first `# ` heading less any number.
     pub(crate) fn read(path: &str, text: &str) -> Adr {
         let name = path.rsplit('/').next().unwrap_or(path);
-        let digits: String = name.chars().take_while(char::is_ascii_digit).collect();
+        let number = digits(name).parse().ok();
         let heading = text
             .lines()
             .find_map(|l| l.strip_prefix("# "))
@@ -100,7 +100,7 @@ impl Adr {
         let title = title.trim_start_matches(|c: char| c.is_ascii_digit() || " .:-–—".contains(c));
         Adr {
             path: path.to_string(),
-            number: digits.parse().ok(),
+            number,
             title: title.to_string(),
         }
     }
@@ -157,11 +157,10 @@ pub(crate) struct Placed {
 /// `text` cut into paragraphs: a list item and a table row are each one, a
 /// fenced block is one; a heading, a table's header and its separator are none.
 pub(crate) fn split(text: &str) -> Vec<Paragraph> {
-    let lines: Vec<&str> = text.lines().collect();
+    let mut lines = text.lines().enumerate().peekable();
     let (mut out, mut open): (Vec<Paragraph>, Option<Paragraph>) = (Vec::new(), None);
-    let mut i = 0;
-    while i < lines.len() {
-        let t = lines[i].trim();
+    while let Some((i, line)) = lines.next() {
+        let t = line.trim();
         let starts = |fenced| Paragraph {
             line: i + 1,
             text: t.to_string(),
@@ -170,23 +169,19 @@ pub(crate) fn split(text: &str) -> Vec<Paragraph> {
         if let Some(fence) = ["```", "~~~"].into_iter().find(|f| t.starts_with(f)) {
             out.extend(open.take());
             let mut block = starts(true);
-            i += 1;
-            while let Some(l) = lines.get(i) {
+            for (_, l) in lines.by_ref() {
                 block.text.push('\n');
                 block.text.push_str(l);
-                i += 1;
                 if l.trim().starts_with(fence) {
                     break;
                 }
             }
             out.push(block);
-            continue;
-        }
-        if t.is_empty() || t.trim_start_matches('#').starts_with(' ') {
+        } else if t.is_empty() || t.trim_start_matches('#').starts_with(' ') {
             out.extend(open.take());
         } else if t.starts_with('|') {
             out.extend(open.take());
-            if !separator(t) && !lines.get(i + 1).is_some_and(|n| separator(n.trim())) {
+            if !separator(t) && !lines.peek().is_some_and(|(_, n)| separator(n.trim())) {
                 out.push(starts(false));
             }
         } else if let Some(p) = open.as_mut().filter(|_| !item(t)) {
@@ -195,10 +190,14 @@ pub(crate) fn split(text: &str) -> Vec<Paragraph> {
         } else {
             out.extend(open.replace(starts(false)));
         }
-        i += 1;
     }
     out.extend(open);
     out
+}
+
+/// The ASCII digits `s` starts with.
+fn digits(s: &str) -> &str {
+    &s[..s.bytes().take_while(u8::is_ascii_digit).count()]
 }
 
 fn separator(t: &str) -> bool {
@@ -206,9 +205,9 @@ fn separator(t: &str) -> bool {
 }
 
 fn item(t: &str) -> bool {
-    let digits = t.chars().take_while(char::is_ascii_digit).count();
+    let n = digits(t).len();
     ["- ", "* ", "+ "].iter().any(|m| t.starts_with(m))
-        || (digits > 0 && [". ", ") "].iter().any(|m| t[digits..].starts_with(m)))
+        || (n > 0 && [". ", ") "].iter().any(|m| t[n..].starts_with(m)))
 }
 
 /// Every code span that could be code, and every quoted string, in
@@ -353,12 +352,9 @@ fn issues(prose: &str) -> Vec<String> {
     let name = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
     let mut out = Vec::new();
     for (i, _) in prose.match_indices('#') {
-        let digits = prose[i + 1..]
-            .bytes()
-            .take_while(u8::is_ascii_digit)
-            .count();
-        let end = i + 1 + digits;
-        if digits == 0 || prose[end..].starts_with(|c: char| c.is_ascii_alphanumeric()) {
+        let n = digits(&prose[i + 1..]).len();
+        let end = i + 1 + n;
+        if n == 0 || prose[end..].starts_with(|c: char| c.is_ascii_alphanumeric()) {
             continue;
         }
         let start = prose[..i].rfind(|c| !name(c)).map_or(0, |j| {
@@ -576,8 +572,7 @@ fn named<'a>(text: &str, adrs: &'a [Adr]) -> Option<&'a Adr> {
         .match_indices("adr")
         .filter_map(|(i, _)| {
             let rest = low[i + 3..].trim_start_matches([' ', '-', '#', '/', '_', ':']);
-            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-            digits.parse().ok()
+            digits(rest).parse().ok()
         })
         .collect();
     adrs.iter().find(|a| {
