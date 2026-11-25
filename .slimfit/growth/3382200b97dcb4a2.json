@@ -1,0 +1,10 @@
+{
+  "tree": "1f5abd7e645b98fad98a58d41ed3dbea42f8f07f+d1fba762150c532c",
+  "lines": 143,
+  "serves": "docfit#11",
+  "considered": "slimfit's tasks module (its own crate, not a dependency of docfit); budget::check's faults as the debt list (they name only what grew, not what is held); docfit where's code, reused through one Seen read instead of copied",
+  "reviewer": "codex:01a21337-2fd7-7292-8c12-57fe3efdfbc1:default",
+  "author": "claude-code:7b3f4a2a-29f0-509b-bc3f-6aee9d5a7f8e:opus",
+  "cut": "In src/tasks.rs, return the rehome and over-budget debts as two ordered groups and remove TaskKind and Debt.kind. In src/cli.rs, use each group’s name for the task kind and its length for the count, then flatten the groups in order. This preserves both JSON output modes and removes the rescan of serialized tasks.",
+  "answer": "made: tasks::debt answers [(kind, debts); 2], TaskKind and Debt.kind are gone, counts are each group length (commit 1f5abd7); the rest is the command, its manual and its tests"
+}

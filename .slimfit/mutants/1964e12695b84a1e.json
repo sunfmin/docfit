@@ -1,0 +1,27 @@
+{
+  "tree": "1f5abd7e645b98fad98a58d41ed3dbea42f8f07f+d1fba762150c532c",
+  "picker": "codex:01a21338-2b9a-7e52-a9f8-ff26d1ebf124:default",
+  "author": "claude-code:7b3f4a2a-29f0-509b-bc3f-6aee9d5a7f8e:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/cli.rs:886:53: replace == with != in Seen::place",
+        "why": "The new tests assert individual paragraph homes but never check the totals in the where evidence.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/cli.rs:847:37: replace == with != in Seen::at",
+        "why": "The new fixtures register no ADR, so they can pass even when the filter excludes every registered ADR.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/paragraph.rs:292:21: replace == with != in place",
+        "why": "The new tests check that a decision is classified as adr without checking whether its named ADR is returned.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}

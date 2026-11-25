@@ -116,11 +116,11 @@ impl Adr {
 /// What the repo holds of a document's candidates: the code spans that are
 /// a path git tracks, those found as a word outside Markdown, the quoted
 /// strings its catalogs hold, and its ADRs.
-pub(crate) struct Known {
+pub(crate) struct Known<'a> {
     pub(crate) paths: BTreeSet<String>,
     pub(crate) words: BTreeSet<String>,
     pub(crate) strings: BTreeSet<String>,
-    pub(crate) adrs: Vec<Adr>,
+    pub(crate) adrs: &'a [Adr],
 }
 
 /// Candidates seen, distinct, in the order the paragraph has them.
@@ -300,7 +300,7 @@ pub(crate) fn place(p: &Paragraph, known: &Known) -> Placed {
     } else {
         Home::Judge
     };
-    let adr = (home == Home::Adr).then(|| named(read, &known.adrs).map(|a| a.path.clone()));
+    let adr = (home == Home::Adr).then(|| named(read, known.adrs).map(|a| a.path.clone()));
     Placed {
         line: p.line,
         text: excerpt(&p.text),
