@@ -57,7 +57,7 @@ fn an_unknown_command_is_refused_with_its_fix() {
 fn version_names_the_crate_version() {
     assert_eq!(
         docfit(&["--version"]),
-        (0, format!("docfit {}\n", env!("CARGO_PKG_VERSION")))
+        (0, format!("docfit {}\n", env!("DOCFIT_VERSION")))
     );
 }
 

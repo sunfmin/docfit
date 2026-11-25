@@ -1,10 +1,16 @@
-# How factorium gates this repo (factorium SPEC.md §5). No [cut] yet: docfit#1 adds it with packaging/release.sh, as slimfit's.
+# How factorium gates this repo (factorium SPEC.md §5).
 [gate]
 fast = "./gate.sh"
 fast_limit = 300
 slow = "./gate.sh"
 slow_limit = 300
 regenerated = [".slimfit/baseline.json"]
+
+[cut]
+steps = ["packaging/release.sh cut $FACTORIUM_VERSION"]
+formula = "sunfmin/tap/docfit"
+# The host's build, then the tap's run (release.sh waits at most 2400s).
+limit = 2700
 
 [idle]
 tasks = "slimfit --version && truefit --version && slimfit next --all --sample 5 && truefit next --all"

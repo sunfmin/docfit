@@ -1,0 +1,6 @@
+{
+  "tree": "260d728193f1b50c2edb00be22a8f8c605bd8072+d1fba762150c532c",
+  "picker": "codex:01a212eb-dde7-7bf1-b810-6981307dfe7e:default",
+  "author": "claude-code:01550892-5b61-57ea-b9f3-bd5c2885de09:opus",
+  "none": "The version assertions distinguish every listed return-value replacement, and the tagless cases reject malformed counts and hashes while accepting valid nonempty inputs."
+}

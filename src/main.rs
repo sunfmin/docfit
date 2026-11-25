@@ -10,6 +10,10 @@ mod pointers;
 mod repo;
 mod sentences;
 
+// build.rs runs it to stamp the version; compiled here too, for its tests.
+#[cfg_attr(not(test), allow(dead_code))]
+mod version;
+
 agent_help::binary!("docfit");
 
 fn main() {

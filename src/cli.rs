@@ -45,7 +45,7 @@ pub(crate) const EXIT_ERROR: i32 = 2;
 #[derive(Parser)]
 #[command(
     name = "docfit",
-    version = env!("CARGO_PKG_VERSION"),
+    version = env!("DOCFIT_VERSION"),
     verbatim_doc_comment,
     disable_help_subcommand = true,
     arg_required_else_help = true
