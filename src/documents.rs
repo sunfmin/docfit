@@ -61,6 +61,13 @@ impl Config {
         self.ignore.iter().any(|g| g.is_match(file))
     }
 
+    /// The Markdown files of `files` it does not ignore.
+    fn markdown<'a>(&'a self, files: &'a [String]) -> impl Iterator<Item = &'a String> {
+        files
+            .iter()
+            .filter(|f| f.ends_with(".md") && !self.ignores(f))
+    }
+
     /// Whether an entry registers `file`.
     fn registers(&self, file: &str) -> bool {
         self.entries.iter().any(|e| e.matcher.is_match(file))
@@ -221,10 +228,7 @@ pub(crate) fn check(config: &Config, files: &[String]) -> Answer {
         documents: BTreeMap::new(),
         faults: Vec::new(),
     };
-    let markdown = files
-        .iter()
-        .filter(|f| f.ends_with(".md") && !config.ignores(f));
-    for file in markdown {
+    for file in config.markdown(files) {
         let matching = || config.entries.iter().filter(|e| e.matcher.is_match(file));
         let mut kinds: Vec<Kind> = Vec::new();
         for entry in matching() {
@@ -321,14 +325,18 @@ pub(crate) fn adopt(config: Option<&str>, files: &[String]) -> Result<Adopted, V
             Some((file.to_string(), Kind::conventional(file)?))
         })
         .collect();
-    let adopted = |text, registered| Adopted {
-        text,
-        registered,
-        ignored: ignored.clone(),
-    };
-    if added.is_empty() {
-        return Ok(adopted(text, added));
+    if !added.is_empty() {
+        text = register_more(&text, &added)?;
     }
+    Ok(Adopted {
+        text,
+        registered: added,
+        ignored,
+    })
+}
+
+/// `text` with a line under `[documents]` for each of `added`, after its last.
+fn register_more(text: &str, added: &BTreeMap<String, Kind>) -> Result<String, Vec<Refusal>> {
     let mut lines: Vec<&str> = text.lines().collect();
     let header = format!("[{TABLE}]");
     let Some(at) = lines
@@ -352,20 +360,15 @@ pub(crate) fn adopt(config: Option<&str>, files: &[String]) -> Result<Adopted, V
         .map(|(file, kind)| format!("{} = \"{}\"", toml::Value::from(file.as_str()), kind.name()))
         .collect();
     lines.splice(end..end, new.iter().map(String::as_str));
-    Ok(adopted(lines.join("\n") + "\n", added))
+    Ok(lines.join("\n") + "\n")
 }
 
 /// For each directory of [`SOURCE`] (the first in its path) holding Markdown
 /// of `files` that `config` neither ignores nor registers, its glob and those
 /// files; but not a directory under which an entry registers a file.
 fn sources(config: &Config, files: &[String]) -> BTreeMap<String, Vec<String>> {
-    let markdown = || {
-        files
-            .iter()
-            .filter(|f| f.ends_with(".md") && !config.ignores(f))
-    };
     let mut globs: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for file in markdown().filter(|f| !config.registers(f)) {
+    for file in config.markdown(files).filter(|f| !config.registers(f)) {
         let dirs: Vec<&str> = file.split('/').collect();
         let dirs = &dirs[..dirs.len() - 1];
         if let Some(at) = dirs.iter().position(|d| SOURCE.contains(d)) {
@@ -375,7 +378,9 @@ fn sources(config: &Config, files: &[String]) -> BTreeMap<String, Vec<String>> {
     }
     globs.retain(|glob, _| {
         let under = matcher(glob).expect("a glob");
-        !markdown().any(|f| config.registers(f) && under.is_match(f))
+        !config
+            .markdown(files)
+            .any(|f| config.registers(f) && under.is_match(f))
     });
     globs
 }
@@ -396,7 +401,7 @@ fn ignore_more<'a>(
     let line = format!("{IGNORE} = {}", toml::Value::Array(all));
     let mut lines: Vec<&str> = text.lines().collect();
     let header = |l: &&str| l.trim_start().starts_with('[');
-    if table.contains_key(IGNORE) {
+    let (at, new) = if table.contains_key(IGNORE) {
         let key = |l: &&str| {
             l.strip_prefix(IGNORE)
                 .is_some_and(|rest| rest.trim_start().starts_with('='))
@@ -420,13 +425,14 @@ fn ignore_more<'a>(
                 ),
             }]);
         };
-        lines.splice(start..end, [line.as_str()]);
-        return Ok(lines.join("\n") + "\n");
-    }
-    let mut at = lines.iter().position(header).unwrap_or(0);
-    while at > 0 && lines[at - 1].trim_start().starts_with('#') {
-        at -= 1;
-    }
-    lines.splice(at..at, [line.as_str(), ""]);
+        (start..end, vec![line.as_str()])
+    } else {
+        let mut at = lines.iter().position(header).unwrap_or(0);
+        while at > 0 && lines[at - 1].trim_start().starts_with('#') {
+            at -= 1;
+        }
+        (at..at, vec![line.as_str(), ""])
+    };
+    lines.splice(at, new);
     Ok(lines.join("\n") + "\n")
 }

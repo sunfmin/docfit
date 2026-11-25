@@ -69,26 +69,21 @@ impl Kind {
         }
     }
 
-    /// The kind's default size in bytes; `None` for a kind with no default,
-    /// whose documents only an entry's `bytes` bounds.
-    fn bytes(self) -> Option<usize> {
-        let kb = match self {
-            Kind::Readme => 4,
-            Kind::Agent => 2,
-            Kind::Adr => 3,
-            Kind::Glossary => 8,
-            Kind::DesignNote | Kind::Skill => 6,
-            Kind::Product => return None,
-        };
-        Some(kb * 1024)
-    }
-
     /// The kind's default budget: a document's size in bytes (`usize::MAX`
-    /// for a kind with no default size: no size is over it), and its longest
-    /// paragraph in characters. A `docfit.toml` entry may set its own.
+    /// for a kind with no default size, which only an entry's `bytes`
+    /// bounds), and its longest paragraph in characters. A `docfit.toml`
+    /// entry may set its own.
     pub(crate) fn budget(self) -> Size {
+        let bytes = match self {
+            Kind::Readme => 4 * 1024,
+            Kind::Agent => 2 * 1024,
+            Kind::Adr => 3 * 1024,
+            Kind::Glossary => 8 * 1024,
+            Kind::DesignNote | Kind::Skill => 6 * 1024,
+            Kind::Product => usize::MAX,
+        };
         Size {
-            bytes: self.bytes().unwrap_or(usize::MAX),
+            bytes,
             paragraph: 600,
         }
     }
@@ -132,13 +127,14 @@ impl Kind {
             "| kind | reader | holds only | bytes | longest paragraph |\n|---|---|---|---|---|\n",
         );
         for kind in Kind::ALL {
-            let (name, reader, holds) = kind.facts();
-            let bytes = kind
-                .bytes()
-                .map_or("none; an entry may set one".to_string(), |b| b.to_string());
+            let ((name, reader, holds), budget) = (kind.facts(), kind.budget());
+            let bytes = match budget.bytes {
+                usize::MAX => "none; an entry may set one".to_string(),
+                bytes => bytes.to_string(),
+            };
             table.push_str(&format!(
                 "| `{name}` | {reader} | {holds} | {bytes} | {} |\n",
-                kind.budget().paragraph
+                budget.paragraph
             ));
         }
         table
