@@ -1,0 +1,15 @@
+{
+  "tree": "63f485320a36f4860655391a9619fca607f008f4+d1fba762150c532c",
+  "picker": "codex:01a21394-5dff-7363-836a-18e1d7bc1f06:default",
+  "author": "claude-code:a9ccc060-02f1-5d1f-b14b-be861a4b2cd2:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/cli.rs:965:50: replace == with != in next",
+        "why": "If A.md and B.md are the first two texts, the inverted lookup swaps their lengths and preserves both totals asserted by the test.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}
