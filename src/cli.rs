@@ -3,6 +3,7 @@
 
 use crate::budget::{self, BASELINE, Baseline, Measured, Size, Stray};
 use crate::documents::{self, Answer, CATALOGS, CONFIG, Config, Document, Refusal, TABLE};
+use crate::hot::{self, Hot};
 use crate::kind::Kind;
 use crate::measurements;
 use crate::paragraph::{self, Adr, Home, Known};
@@ -309,7 +310,7 @@ enum Cmd {
         #[arg(verbatim_doc_comment)]
         file: PathBuf,
     },
-    /// Lists the repo's document debt as tasks: each file the baseline holds to rehome, each document it holds over its budget, and each file it holds at a count of local refs, restatements or measurements, with the steps that pay it.
+    /// Lists the repo's document debt as tasks: each file the baseline holds to rehome, each document it holds over its budget, each file it holds at a count of local refs, restatements or measurements, and each document most changes touch, with the steps that pay it.
     ///
     /// ## When to run it
     ///
@@ -317,7 +318,9 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads what `docfit check` reads, and, for each task's file, what `docfit where` reads. It writes nothing.
+    /// It reads what `docfit check` reads, for each task's file what `docfit where` reads, and the files each of the last `window` commits of HEAD's first-parent history changed (`git log --first-parent -m --name-only`; none before the first commit). It writes nothing.
+    ///
+    /// A registered document is hot when it changed in more than `share` of those `window` commits: by default `{const:HOT}`, which `docfit.toml` may set, before its first table, either number or both. The share is of the window, so a repo with fewer commits than `window` makes fewer documents hot.
     ///
     /// ## What it answers
     ///
@@ -326,12 +329,12 @@ enum Cmd {
     /// - `by`: the docfit that read them, `docfit <version>`.
     /// - `counts`: how many tasks of each kind there are.
     /// - `tasks`, with `--all`: every task, by kind in the order below, each in path order; without it, `task`: the first, or null. Each has:
-    ///   - `kind`: `rehome`, a file the baseline holds to rehome that is still registered under no kind; `over-budget`, a document the baseline holds over its budget that is still over it; `local-refs`, a file the baseline holds at a count of local tracker refs that still cites one; `restates`, a document it holds at a count of catalog strings or copied runs that still restates one; or `measurement`, a document it holds at a count of measurements that still holds one (`docfit check --help`). A file with several of these is a task of each.
+    ///   - `kind`: `rehome`, a file the baseline holds to rehome that is still registered under no kind; `over-budget`, a document the baseline holds over its budget that is still over it; `local-refs`, a file the baseline holds at a count of local tracker refs that still cites one; `restates`, a document it holds at a count of catalog strings or copied runs that still restates one; `measurement`, a document it holds at a count of measurements that still holds one (`docfit check --help`); or `hot-file`, a registered document that is hot (above), held or not. A file with several of these is a task of each.
     ///   - `summary`: the file, and what it is.
     ///   - `files`: the one file, from the repo's top.
     ///   - `steps`: how to pay it; the text `docfit help <kind>` prints, `docfit help rehome` for `rehome` and `over-budget`.
-    ///   - `accept`: what holds it done: after `docfit ratchet`, `docfit check` exits {const:EXIT_OK} and `{const:BASELINE}` no longer holds the file in what the task pays (to rehome: gone or registered under a kind; over its budget: within it; a count: down to 0).
-    ///   - `evidence`: `held`, what the baseline holds it at, and what is found in it now: for `rehome` and `over-budget`, `size` (a file's bytes; a document's `bytes` and `paragraph`), for a document its `budget`, and `where`, `docfit where`'s answer on the file; for `local-refs`, `refs`, each `{"line", "ref"}`; for `restates`, `strings` and `copies`, each `{"line", "end", "found", "from"}`, `held` a count of each; for `measurement`, `measurements`, each `{"line", "found"}`, `line` where its paragraph starts.
+    ///   - `accept`: what holds it done: after `docfit ratchet`, `docfit check` exits {const:EXIT_OK} and `{const:BASELINE}` no longer holds the file in what the task pays (to rehome: gone or registered under a kind; over its budget: within it; a count: down to 0). For `hot-file`, the document is within its kind's budget and `docfit check` exits {const:EXIT_OK}.
+    ///   - `evidence`: `held`, what the baseline holds it at, and what is found in it now: for `rehome` and `over-budget`, `size` (a file's bytes; a document's `bytes` and `paragraph`), for a document its `budget`, and `where`, `docfit where`'s answer on the file; for `local-refs`, `refs`, each `{"line", "ref"}`; for `restates`, `strings` and `copies`, each `{"line", "end", "found", "from"}`, `held` a count of each; for `measurement`, `measurements`, each `{"line", "found"}`, `line` where its paragraph starts. For `hot-file` there is no `held`: `share`, the share of the window it changed in, `changed` and `window`, the counts of it, `commits`, the last {const:HOT_SHOWN} commits that changed it, newest first, each `{"commit", "subject"}`, and its `size` and `budget`.
     /// - `notes`: what was not looked for; without a baseline nothing is held, so there is no task.
     /// - `next`: do the first task by its steps, or that there is nothing to do.
     ///
@@ -340,7 +343,7 @@ enum Cmd {
     /// ```json
     /// {
     ///   "by": "docfit 0.1.0",
-    ///   "counts": { "rehome": 1, "over-budget": 0, "local-refs": 0, "restates": 0, "measurement": 0 },
+    ///   "counts": { "rehome": 1, "over-budget": 0, "local-refs": 0, "restates": 0, "measurement": 0, "hot-file": 0 },
     ///   "tasks": [
     ///     { "kind": "rehome", "summary": "`SPEC.md` (15360 bytes) is registered under no kind, held to rehome: move its content to its homes", "files": ["SPEC.md"], "steps": "…", "accept": "…", "evidence": { "size": 15360, "held": 15360, "where": { "file": "SPEC.md", "kind": null, "paragraphs": ["…"] } } }
     ///   ],
@@ -353,12 +356,13 @@ enum Cmd {
     ///
     /// ## What it may refuse
     ///
-    /// What `docfit check` refuses, and what `docfit where` refuses on a task's file; it exits {const:EXIT_ERROR}.
+    /// What `docfit check` refuses, what `docfit where` refuses on a task's file, and a `hot` that is not `{ window = <n>, share = <x> }` with `window` at least 1 and `share` between 0 and 1; it exits {const:EXIT_ERROR}.
     ///
     /// ## What trips you up
     ///
     /// - A file the baseline holds that is gone, registered since, back within its budget, or down to no ref, restatement or measurement is no task: `docfit check`'s `next` says to run `docfit ratchet`, which drops it.
     /// - A file is a task until `docfit ratchet` drops it from the baseline: cutting it is not enough, commit the baseline with the change.
+    /// - A `hot-file` task is no baseline's: it stays listed while the document stays hot, after it is within its budget, until later changes stop touching it. `docfit check` is never red on it.
     #[command(
         next_help_heading = "Run by the agent, and by factorium's idle work",
         verbatim_doc_comment
@@ -424,18 +428,30 @@ struct RestatesTopic;
 #[topic(name = "measurement")]
 struct MeasurementTopic;
 
+/// How to cool a document every change touches, and so pay a `hot-file` task of `docfit next`. A hot document is where changes conflict, and it grows with each one; the goal is that the next change does not need to touch it.
+///
+/// 1. For each recent change in the task's `evidence` (`commits`, newest first, each with its `subject`), find what it added to the document: `git show <commit> -- <file>`.
+/// 2. Move what has a better home there: to the code, the catalog, an ADR, or the issue it was the acceptance of. Leave in the document only what its kind holds (`docfit --help`); `docfit where <file>` says where each paragraph goes.
+/// 3. Cut the document to within its kind's budget, run `docfit check`, and commit: the task is done once the document is within its budget. It stays hot until the changes after it stop touching it; being hot is a signal, not a fault, and `docfit check` is never red on it.
+#[derive(Topic)]
+#[topic(name = "hot-file")]
+struct HotFileTopic;
+
 pub(crate) fn help() -> Help {
     Help::new(<Cli as clap::CommandFactory>::command())
         .topic::<RehomeTopic>()
         .topic::<LocalRefsTopic>()
         .topic::<RestatesTopic>()
         .topic::<MeasurementTopic>()
+        .topic::<HotFileTopic>()
         .constant("KINDS", Kind::table())
         .constant("HOMES", Home::table())
         .constant("BASELINE", BASELINE)
         .constant("CONFIG", CONFIG)
         .constant("IGNORED", quoted(&documents::IGNORED))
         .constant("LOCAL_REFS", refs::KEY)
+        .constant("HOT", hot::shown())
+        .constant("HOT_SHOWN", hot::SHOWN)
         .constant("RUN", restates::RUN)
         .constant("UNMEASURED", quoted(&Kind::UNMEASURED.map(Kind::name)))
         .constant("UNITS", quoted(&paragraph::UNITS))
@@ -877,30 +893,44 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
     };
     let counted = seen.read.counted(&seen.answer);
     let [rehome, over_budget] = tasks::debt(&docs, &strays, &held);
+    let history = repo::history(&top, seen.hot.window)?;
     // Each kind in the order `docfit next` answers it: its name, its steps,
-    // what the baseline holds its file at until it is done, and its debt. The
-    // rehome steps start from `docfit where`, so its answer is evidence.
+    // what the baseline holds its file at until it is done (none: the hot
+    // file, which no baseline holds, is done within its budget), and its
+    // debt. The rehome steps start from `docfit where`, so its answer is
+    // evidence.
     let (rehome_steps, refs) = (RehomeTopic::MARKDOWN, counted.refs);
     let debt = [
-        ("rehome", rehome_steps, "to rehome", rehome),
-        ("over-budget", rehome_steps, "over its budget", over_budget),
+        ("rehome", rehome_steps, Some("to rehome"), rehome),
+        (
+            "over-budget",
+            rehome_steps,
+            Some("over its budget"),
+            over_budget,
+        ),
         (
             "local-refs",
             LocalRefsTopic::MARKDOWN,
-            "at a count of local refs",
+            Some("at a count of local refs"),
             refs.map_or_else(Vec::new, |f| refs::debt(f, &held)),
         ),
         (
             "restates",
             RestatesTopic::MARKDOWN,
-            "at a count of restatements",
+            Some("at a count of restatements"),
             restates::debt(&counted.restated, &held),
         ),
         (
             "measurement",
             MeasurementTopic::MARKDOWN,
-            "at a count of measurements",
+            Some("at a count of measurements"),
             measurements::debt(&counted.measured, &held),
+        ),
+        (
+            "hot-file",
+            HotFileTopic::MARKDOWN,
+            None,
+            hot::debt(&docs, &history, seen.hot),
         ),
     ];
     let (mut tasks, mut counts) = (Vec::new(), serde_json::Map::new());
@@ -915,10 +945,16 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
             tasks.push(json!({
                 "kind": kind, "summary": debt.summary, "files": [debt.file],
                 "steps": steps,
-                "accept": format!(
-                    "`docfit ratchet`, then `docfit check` exits {EXIT_OK} and {BASELINE} no longer holds `{}` {holds}",
-                    debt.file
-                ),
+                "accept": match holds {
+                    Some(holds) => format!(
+                        "`docfit ratchet`, then `docfit check` exits {EXIT_OK} and {BASELINE} no longer holds `{}` {holds}",
+                        debt.file
+                    ),
+                    None => format!(
+                        "`{}` is within its kind's budget (`evidence.budget`), and `docfit check` exits {EXIT_OK}",
+                        debt.file
+                    ),
+                },
                 "evidence": evidence,
             }));
         }
@@ -962,13 +998,15 @@ fn place(file: &Path) -> Result<(String, i32), Vec<Refusal>> {
 
 /// What `docfit where` reads of a repo, once, to place any of its documents:
 /// its registered documents, the paths git tracks, the text of every tracked
-/// file outside Markdown, its string catalogs, and its ADRs.
+/// file outside Markdown, its string catalogs, and its ADRs; and, for `docfit
+/// next`, when `docfit.toml` holds a document hot.
 struct Seen {
     answer: Answer,
     tracked: Vec<String>,
     code: Vec<String>,
     read: Read,
     adrs: Vec<Adr>,
+    hot: Hot,
 }
 
 impl Seen {
@@ -992,6 +1030,7 @@ impl Seen {
             code,
             read,
             adrs,
+            hot: config.hot,
         })
     }
 
