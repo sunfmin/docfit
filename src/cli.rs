@@ -327,7 +327,7 @@ enum Cmd {
     /// The shape of `slimfit next --all`'s and `truefit next --all`'s:
     ///
     /// - `by`: the docfit that read them, `docfit <version>`.
-    /// - `counts`: how many tasks of each kind there are.
+    /// - `counts`: how many tasks of each kind there are, and `{const:MUST_READ}`: the bytes of the documents of the kind `agent` summed, which every agent reads on every turn. It is a trend, never a task or a fault: each of them has its own budget.
     /// - `tasks`, with `--all`: every task, by kind in the order below, each in path order; without it, `task`: the first, or null. Each has:
     ///   - `kind`: `rehome`, a file the baseline holds to rehome that is still registered under no kind; `over-budget`, a document the baseline holds over its budget that is still over it; `local-refs`, a file the baseline holds at a count of local tracker refs that still cites one; `restates`, a document it holds at a count of catalog strings or copied runs that still restates one; `measurement`, a document it holds at a count of measurements that still holds one (`docfit check --help`); or `hot-file`, a registered document that is hot (above), held or not. A file with several of these is a task of each.
     ///   - `summary`: the file, and what it is.
@@ -335,7 +335,7 @@ enum Cmd {
     ///   - `steps`: how to pay it; the text `docfit help <kind>` prints, `docfit help rehome` for `rehome` and `over-budget`.
     ///   - `accept`: what holds it done: after `docfit ratchet`, `docfit check` exits {const:EXIT_OK} and `{const:BASELINE}` no longer holds the file in what the task pays (to rehome: gone or registered under a kind; over its budget: within it; a count: down to 0). For `hot-file`, the document is within its kind's budget and `docfit check` exits {const:EXIT_OK}.
     ///   - `evidence`: `held`, what the baseline holds it at, and what is found in it now: for `rehome` and `over-budget`, `size` (a file's bytes; a document's `bytes` and `paragraph`), for a document its `budget`, and `where`, `docfit where`'s answer on the file; for `local-refs`, `refs`, each `{"line", "ref"}`; for `restates`, `strings` and `copies`, each `{"line", "end", "found", "from"}`, `held` a count of each; for `measurement`, `measurements`, each `{"line", "found"}`, `line` where its paragraph starts. For `hot-file` there is no `held`: `share`, the share of the window it changed in, `changed` and `window`, the counts of it, `commits`, the last {const:HOT_SHOWN} commits that changed it, newest first, each `{"commit", "subject"}`, and its `size` and `budget`.
-    /// - `notes`: what was not looked for; without a baseline nothing is held, so there is no task.
+    /// - `notes`: what was not looked for (without a baseline nothing is held, so there is no task), and always the trend of the total: `{const:MUST_READ} <n>, was <m> at <commit>, …`, `<m>` the agent documents' bytes at the commit `{const:BASELINE}` was last written in (`git log -1 -- {const:BASELINE}`), as its `docfit.toml` registers them; before a commit writes it beside a `docfit.toml`, that it is compared with nothing.
     /// - `next`: do the first task by its steps, or that there is nothing to do.
     ///
     /// For example, with `SPEC.md` held to rehome (`where` cut short):
@@ -343,11 +343,11 @@ enum Cmd {
     /// ```json
     /// {
     ///   "by": "docfit 0.1.0",
-    ///   "counts": { "rehome": 1, "over-budget": 0, "local-refs": 0, "restates": 0, "measurement": 0, "hot-file": 0 },
+    ///   "counts": { "rehome": 1, "over-budget": 0, "local-refs": 0, "restates": 0, "measurement": 0, "hot-file": 0, "must_read_bytes": 2310 },
     ///   "tasks": [
     ///     { "kind": "rehome", "summary": "`SPEC.md` (15360 bytes) is registered under no kind, held to rehome: move its content to its homes", "files": ["SPEC.md"], "steps": "…", "accept": "…", "evidence": { "size": 15360, "held": 15360, "where": { "file": "SPEC.md", "kind": null, "paragraphs": ["…"] } } }
     ///   ],
-    ///   "notes": [],
+    ///   "notes": ["must_read_bytes 2310, was 1980 at 3f2a9c1, the commit .docfit/baseline.json was last written in"],
     ///   "next": "do the first task by its steps, then its accept, and commit; then `docfit next` again"
     /// }
     /// ```
@@ -452,6 +452,7 @@ pub(crate) fn help() -> Help {
         .constant("LOCAL_REFS", refs::KEY)
         .constant("HOT", hot::shown())
         .constant("HOT_SHOWN", hot::SHOWN)
+        .constant("MUST_READ", MUST_READ)
         .constant("RUN", restates::RUN)
         .constant("UNMEASURED", quoted(&Kind::UNMEASURED.map(Kind::name)))
         .constant("UNITS", quoted(&paragraph::UNITS))
@@ -882,7 +883,7 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
     let texts = read(&top, &seen.answer)?;
     let docs = measured(&texts, &Tree::new(&seen.tracked));
     let strays = strays(&top, &seen.answer)?;
-    let (held, notes) = match baseline(&top)? {
+    let (held, mut notes) = match baseline(&top)? {
         Some(held) => (held, Vec::<String>::new()),
         None => (
             Baseline::new(),
@@ -959,6 +960,14 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
             }));
         }
     }
+    let must_read = seen
+        .answer
+        .must_read(|f| texts.iter().find(|t| t.0 == f).map_or(0, |t| t.2.len()));
+    counts.insert(MUST_READ.to_string(), json!(must_read));
+    notes.push(match must_read_then(&top) {
+        Some((commit, then)) => format!("{MUST_READ} {must_read}, was {then} at {commit}, the commit {BASELINE} was last written in"),
+        None => format!("{MUST_READ} {must_read}; no commit has written {BASELINE} beside a {CONFIG}, so it is compared with nothing"),
+    });
     let then = if tasks.is_empty() {
         "nothing to do: the baseline holds no debt that is still there"
     } else {
@@ -974,6 +983,18 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
         answer["task"] = tasks.into_iter().next().unwrap_or(Value::Null);
     }
     Ok((pretty(&answer), EXIT_OK))
+}
+
+/// The count of the agent documents' bytes in `docfit next`'s `counts`.
+const MUST_READ: &str = "must_read_bytes";
+
+/// The commit {BASELINE} was last written in, and the agent documents' bytes
+/// its {CONFIG} registers at it.
+fn must_read_then(top: &Path) -> Option<(String, usize)> {
+    let (commit, config, sizes) = repo::at_last_change(top, BASELINE, CONFIG)?;
+    let paths: Vec<String> = sizes.keys().cloned().collect();
+    let answer = documents::check(&documents::config(&config).ok()?, &paths);
+    Some((commit, answer.must_read(|f| sizes[f])))
 }
 
 fn place(file: &Path) -> Result<(String, i32), Vec<Refusal>> {

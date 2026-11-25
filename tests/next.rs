@@ -41,7 +41,7 @@ fn a_baseline_with_debt_answers_one_task_of_each_kind() {
     assert_eq!(answer["by"], format!("docfit {}", env!("DOCFIT_VERSION")));
     assert_eq!(
         answer["counts"],
-        json!({ "rehome": 1, "over-budget": 1, "local-refs": 1, "restates": 1, "measurement": 1, "hot-file": 0 })
+        json!({ "rehome": 1, "over-budget": 1, "local-refs": 1, "restates": 1, "measurement": 1, "hot-file": 0, "must_read_bytes": 0 })
     );
     let tasks = answer["tasks"].as_array().unwrap();
     assert_eq!(tasks.len(), 5, "{answer}");
@@ -127,7 +127,7 @@ fn the_steps_are_the_text_help_rehome_prints_and_put_the_map_in_the_commit() {
 
 #[test]
 fn a_task_paid_and_ratcheted_is_gone() {
-    let none = json!({ "rehome": 0, "over-budget": 0, "local-refs": 0, "restates": 0, "measurement": 0, "hot-file": 0 });
+    let none = json!({ "rehome": 0, "over-budget": 0, "local-refs": 0, "restates": 0, "measurement": 0, "hot-file": 0, "must_read_bytes": 0 });
     let dir = indebted();
     std::fs::remove_file(dir.path().join("SPEC.md")).unwrap();
     std::fs::write(dir.path().join("README.md"), "# Readme\n").unwrap();
@@ -181,7 +181,13 @@ fn a_repo_with_no_debt_answers_no_task() {
     let (code, answer) = docfit(dir.path(), &["next", "--all"]);
     assert_eq!(code, 0);
     assert_eq!(answer["tasks"], json!([]));
-    assert_eq!(answer["notes"], json!([]));
+    // Nothing committed yet: the total has nothing to be compared with.
+    assert_eq!(
+        answer["notes"],
+        json!([
+            "must_read_bytes 0; no commit has written .docfit/baseline.json beside a docfit.toml, so it is compared with nothing"
+        ])
+    );
     let (_, first) = docfit(dir.path(), &["next"]);
     assert_eq!(first["task"], json!(null));
 }
@@ -304,4 +310,67 @@ fn hot_in_docfit_toml_moves_the_line() {
             .contains("share = 0.25"),
         "{answer}"
     );
+}
+
+#[test]
+fn must_read_bytes_is_the_agent_docs_total_and_its_note_the_total_at_the_baselines_commit() {
+    let (a, b) = ("# A\n\n".to_string() + &"a".repeat(95), "b".repeat(50));
+    let dir = repo(&[
+        (
+            "docfit.toml",
+            "[documents]\n\"A.md\" = \"agent\"\n\"B.md\" = \"agent\"\n\"README.md\" = \"readme\"\n",
+        ),
+        ("A.md", &a),
+        ("B.md", &b),
+        ("README.md", "# Readme\n"),
+    ]);
+    let commit = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm"];
+    common::git(dir.path(), &[&commit[..], &["first"]].concat());
+    // A commit, but none with the baseline: compared with nothing.
+    let (_, unwritten) = docfit(dir.path(), &["next", "--all"]);
+    assert_eq!(unwritten["counts"]["must_read_bytes"], 150, "{unwritten}");
+    assert!(
+        unwritten["notes"][1]
+            .as_str()
+            .unwrap()
+            .contains("compared with nothing"),
+        "{unwritten}"
+    );
+    assert_eq!(docfit(dir.path(), &["init"]).0, 0);
+    common::git(dir.path(), &["add", "-A"]);
+    common::git(
+        dir.path(),
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "adopt",
+        ],
+    );
+    let at = String::from_utf8(
+        isolated(Command::new("git"), dir.path())
+            .args(["rev-parse", "--short", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("A.md"), a + "\nGrown.\n").unwrap();
+    let (code, answer) = docfit(dir.path(), &["next", "--all"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["counts"]["must_read_bytes"], 158, "{answer}");
+    assert_eq!(answer["tasks"], json!([]), "a trend, never a task");
+    let want = format!("must_read_bytes 158, was 150 at {}", at.trim());
+    assert!(
+        answer["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n.as_str().unwrap().starts_with(&want)),
+        "{answer}"
+    );
+    assert_eq!(docfit(dir.path(), &["check"]).0, 0);
 }
