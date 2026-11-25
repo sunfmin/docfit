@@ -37,8 +37,12 @@ fn isolated(mut command: Command, dir: &Path) -> Command {
 }
 
 fn check(dir: &Path) -> (i32, Value) {
+    docfit(dir, "check")
+}
+
+fn docfit(dir: &Path, command: &str) -> (i32, Value) {
     let out = isolated(Command::new(env!("CARGO_BIN_EXE_docfit")), dir)
-        .arg("check")
+        .arg(command)
         .output()
         .unwrap();
     let stdout = String::from_utf8(out.stdout).unwrap();
@@ -168,6 +172,10 @@ fn a_docfit_toml_docfit_cannot_read_is_refused_with_its_fix() {
             "[documents]\n\"README.md\" = 1\n",
             "give `README.md` one of the kinds",
         ),
+        (
+            "[documents]\n\"README.md\" = { kind = \"readme\", size = 3 }\n",
+            "give `README.md` one of the kinds readme, agent, adr, glossary, design-note, as `\"<kind>\"` or `{ kind",
+        ),
     ] {
         let dir = repo(&[("docfit.toml", toml), ("README.md", "r\n")]);
         let (code, answer) = check(dir.path());
@@ -228,4 +236,239 @@ fn without_git_on_path_it_is_refused_with_its_fix() {
     let answer: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(out.status.code(), Some(2), "{answer}");
     assert_eq!(answer["error"][0]["fix"], "install git, on PATH");
+}
+
+const BIG: &str = "[documents]\n\"README.md\" = { kind = \"readme\", bytes = 10, line = 5 }\n";
+
+fn baseline(dir: &Path) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(dir.join(".docfit/baseline.json")).unwrap())
+        .unwrap()
+}
+
+#[test]
+fn over_its_budget_with_no_baseline_is_red() {
+    let dir = repo(&[("docfit.toml", BIG), ("README.md", "ab\nabcdefg\n")]);
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 1, "{answer}");
+    let faults = answer["faults"].as_array().unwrap();
+    assert_eq!(faults[0]["fault"], "over_budget");
+    assert_eq!(
+        (&faults[0]["size"], &faults[0]["limit"]),
+        (&11.into(), &10.into())
+    );
+    assert_eq!(faults[1]["fault"], "line_too_long");
+    assert_eq!(faults[1]["line"], 2);
+    assert_eq!(
+        (&faults[1]["size"], &faults[1]["limit"]),
+        (&7.into(), &5.into())
+    );
+    let fix = faults[1]["fix"].as_str().unwrap();
+    assert!(
+        fix.starts_with("break line 2 of `README.md` at its sentences"),
+        "{fix}"
+    );
+    assert!(fix.contains("`docfit fmt` (docfit#8)"), "{fix}");
+    assert!(
+        fix.contains("`docfit ratchet` writes .docfit/baseline.json"),
+        "{fix}"
+    );
+}
+
+#[test]
+fn the_kinds_default_budget_holds_where_no_entry_sets_one() {
+    let long = "x".repeat(201);
+    let dir = repo(&[("docfit.toml", README_ONLY), ("README.md", &long)]);
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 1, "{answer}");
+    assert_eq!(answer["faults"][0]["fault"], "line_too_long");
+    assert_eq!(answer["faults"][0]["limit"], 200);
+    assert_eq!(answer["faults"].as_array().unwrap().len(), 1, "{answer}");
+}
+
+#[test]
+fn over_budget_but_within_the_baseline_is_green_and_growth_past_it_red() {
+    let dir = repo(&[("docfit.toml", BIG), ("README.md", "ab\nabcdefg\n")]);
+    let (code, answer) = docfit(dir.path(), "ratchet");
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["changed"], true);
+    let held = serde_json::json!({ "README.md": { "bytes": 11, "line": 7 } });
+    assert_eq!(answer["baseline"], held);
+    assert_eq!(baseline(dir.path()), held);
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 0, "{answer}");
+
+    std::fs::write(dir.path().join("README.md"), "ab\nabcdefgh\n").unwrap();
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 1, "{answer}");
+    let faults = answer["faults"].as_array().unwrap();
+    assert_eq!(
+        (&faults[0]["fault"], &faults[0]["limit"]),
+        (&"over_budget".into(), &11.into())
+    );
+    assert!(
+        faults[0]["fix"]
+            .as_str()
+            .unwrap()
+            .contains("(it is 12, past the 11 .docfit/baseline.json holds it at)"),
+        "{answer}"
+    );
+    assert_eq!(
+        (&faults[1]["fault"], &faults[1]["limit"]),
+        (&"line_too_long".into(), &7.into())
+    );
+    assert!(
+        !faults[1]["fix"].as_str().unwrap().contains("adopting"),
+        "{answer}"
+    );
+}
+
+#[test]
+fn ratchet_never_raises_a_number() {
+    let toml = "[documents]\n\"*.md\" = { kind = \"readme\", bytes = 10, line = 5 }\n";
+    let dir = repo(&[
+        ("docfit.toml", toml),
+        ("README.md", "abcdefghijkl\n"),
+        ("A.md", "a\n"),
+    ]);
+    docfit(dir.path(), "ratchet");
+    assert_eq!(
+        baseline(dir.path()),
+        serde_json::json!({ "README.md": { "bytes": 13, "line": 12 } })
+    );
+
+    // Grown, and a new document over its budget: neither raises the baseline.
+    std::fs::write(dir.path().join("README.md"), "abcdefghijklmn\n").unwrap();
+    std::fs::write(dir.path().join("A.md"), "abcdefghijklmn\n").unwrap();
+    let (code, answer) = docfit(dir.path(), "ratchet");
+    assert_eq!((code, &answer["changed"]), (0, &false.into()), "{answer}");
+    assert_eq!(
+        baseline(dir.path()),
+        serde_json::json!({ "README.md": { "bytes": 13, "line": 12 } })
+    );
+    assert_eq!(check(dir.path()).0, 1);
+
+    // Shrunk: lowered; its line back within budget leaves the baseline.
+    std::fs::write(dir.path().join("README.md"), "abcd\nabcd\nab\n").unwrap();
+    std::fs::write(dir.path().join("A.md"), "a\n").unwrap();
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 0, "{answer}");
+    assert!(
+        answer["next"]
+            .as_str()
+            .unwrap()
+            .starts_with("run `docfit ratchet`"),
+        "{answer}"
+    );
+    let (_, answer) = docfit(dir.path(), "ratchet");
+    assert_eq!(answer["changed"], true, "{answer}");
+    assert_eq!(
+        baseline(dir.path()),
+        serde_json::json!({ "README.md": { "bytes": 13 } })
+    );
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 0, "{answer}");
+    assert!(
+        answer["next"]
+            .as_str()
+            .unwrap()
+            .starts_with("nothing to do"),
+        "{answer}"
+    );
+
+    // Within budget whole: the baseline is empty, and stays.
+    std::fs::write(dir.path().join("README.md"), "ab\n").unwrap();
+    docfit(dir.path(), "ratchet");
+    assert_eq!(baseline(dir.path()), serde_json::json!({}));
+    std::fs::write(dir.path().join("README.md"), "abcdefghijklmn\n").unwrap();
+    docfit(dir.path(), "ratchet");
+    assert_eq!(baseline(dir.path()), serde_json::json!({}));
+}
+
+#[test]
+fn the_smallest_budget_of_the_matching_entries_holds() {
+    let toml = "[documents]\n\"*.md\" = { kind = \"readme\", bytes = 10 }\n\"README.md\" = { kind = \"readme\", bytes = 3 }\n";
+    let dir = repo(&[("docfit.toml", toml), ("README.md", "abcd\n")]);
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 1, "{answer}");
+    assert_eq!(answer["faults"][0]["limit"], 3);
+}
+
+#[test]
+fn a_baseline_or_document_it_cannot_read_is_refused() {
+    let dir = repo(&[("docfit.toml", README_ONLY), ("README.md", "r\n")]);
+    std::fs::create_dir(dir.path().join(".docfit")).unwrap();
+    std::fs::write(
+        dir.path().join(".docfit/baseline.json"),
+        "{\"README.md\": 3}",
+    )
+    .unwrap();
+    for command in ["check", "ratchet"] {
+        let (code, answer) = docfit(dir.path(), command);
+        assert_eq!(code, 2, "{answer}");
+        assert!(
+            answer["error"][0]["fix"]
+                .as_str()
+                .unwrap()
+                .starts_with("restore .docfit/baseline.json from git"),
+            "{answer}"
+        );
+    }
+    std::fs::remove_file(dir.path().join("README.md")).unwrap();
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 2, "{answer}");
+    assert_eq!(
+        answer["error"][0]["fix"],
+        "restore `README.md` as UTF-8 text, or `git rm` it"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_baseline_it_cannot_read_or_write_is_refused() {
+    let dir = repo(&[("docfit.toml", README_ONLY), ("README.md", "r\n")]);
+    use std::os::unix::fs::PermissionsExt;
+    let held = dir.path().join(".docfit");
+    std::fs::create_dir(&held).unwrap();
+    std::fs::set_permissions(&held, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let (code, answer) = docfit(dir.path(), "ratchet");
+    assert_eq!(code, 2, "{answer}");
+    assert!(
+        answer["error"][0]["fix"]
+            .as_str()
+            .unwrap()
+            .ends_with("writable, then run it again"),
+        "{answer}"
+    );
+    std::fs::set_permissions(&held, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::create_dir(held.join("baseline.json")).unwrap();
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 2, "{answer}");
+    assert_eq!(
+        answer["error"][0]["fix"],
+        "make .docfit/baseline.json readable, or restore it from git"
+    );
+}
+
+#[test]
+fn at_its_budget_exactly_is_within_it() {
+    // Two lines of 7, the first reported; 16 bytes, not past a baseline.
+    let toml = "[documents]\n\"README.md\" = { kind = \"readme\", bytes = 10, line = 6 }\n";
+    let dir = repo(&[("docfit.toml", toml), ("README.md", "abcdefg\nabcdefg\n")]);
+    let (_, answer) = check(dir.path());
+    assert_eq!(answer["faults"][1]["line"], 1, "{answer}");
+    assert!(
+        answer["faults"][0]["fix"]
+            .as_str()
+            .unwrap()
+            .contains("(it is 16): "),
+        "{answer}"
+    );
+    docfit(dir.path(), "ratchet");
+    // Shrunk to its byte budget exactly: that measure leaves the baseline.
+    std::fs::write(dir.path().join("README.md"), "abcdefg\nb\n").unwrap();
+    docfit(dir.path(), "ratchet");
+    assert_eq!(
+        baseline(dir.path()),
+        serde_json::json!({ "README.md": { "line": 7 } })
+    );
 }
