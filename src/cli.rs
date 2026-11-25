@@ -519,7 +519,13 @@ impl Read {
             .map(|t| {
                 (
                     t.path.as_str(),
-                    restates::find(&t.path, &t.text, &self.catalogs, &index),
+                    restates::find(
+                        &t.path,
+                        &t.text,
+                        &paragraph::split(&t.text),
+                        &self.catalogs,
+                        &index,
+                    ),
                 )
             })
             .collect()
@@ -920,7 +926,7 @@ impl Seen {
                 .into_iter()
                 .partition(|s| paragraph::is_path(s, &self.tracked));
         let index = Index::new(&self.read.kept);
-        let restates = restates::find(name, text, &self.read.catalogs, &index);
+        let restates = restates::find(name, text, &paragraphs, &self.read.catalogs, &index);
         let known = Known {
             words: paragraph::words(others.iter().map(String::as_str), &self.code),
             paths,

@@ -6,7 +6,7 @@
 //! texts, the catalogs and the baseline arrive as arguments.
 
 use crate::budget::{Baseline, Held, Hold};
-use crate::paragraph;
+use crate::paragraph::{self, Paragraph};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 
@@ -40,12 +40,9 @@ pub(crate) struct Restates {
 /// A line, trimmed, with the line (from 1) it is on.
 type Line<'a> = (usize, &'a str);
 
-/// Every run of [`RUN`] non-blank lines of the files it is made from, to
-/// find a document's copies by.
-pub(crate) struct Index<'a> {
-    files: Vec<(&'a str, Vec<Line<'a>>)>,
-    at: HashMap<Vec<&'a str>, Vec<(usize, usize)>>,
-}
+/// Every run of [`RUN`] non-blank lines of the files it is made from, each
+/// with where it is: the file's path, and the line it starts on.
+pub(crate) struct Index<'a>(HashMap<Vec<&'a str>, Vec<(&'a str, usize)>>);
 
 /// `text`'s non-blank lines, trimmed.
 fn lines(text: &str) -> Vec<Line<'_>> {
@@ -58,31 +55,32 @@ fn lines(text: &str) -> Vec<Line<'_>> {
 
 impl<'a> Index<'a> {
     pub(crate) fn new(texts: &'a [Text]) -> Index<'a> {
-        let files: Vec<_> = texts
-            .iter()
-            .map(|t| (t.path.as_str(), lines(&t.text)))
-            .collect();
-        let mut at: HashMap<Vec<&str>, Vec<(usize, usize)>> = HashMap::new();
-        for (f, (_, lines)) in files.iter().enumerate() {
-            for (i, run) in lines.windows(RUN).enumerate() {
-                at.entry(run.iter().map(|l| l.1).collect())
-                    .or_default()
-                    .push((f, i));
+        let mut at: HashMap<Vec<&str>, Vec<(&str, usize)>> = HashMap::new();
+        for t in texts {
+            for run in lines(&t.text).windows(RUN) {
+                let key = run.iter().map(|l| l.1).collect();
+                at.entry(key).or_default().push((&t.path, run[0].0));
             }
         }
-        Index { files, at }
+        Index(at)
     }
 }
 
-/// What `file`'s `text` restates: each quoted string outside fenced code and
-/// code spans that a catalog of `catalogs` holds verbatim as a quoted string,
-/// at the line its paragraph starts on; and each run of [`RUN`] or more
-/// non-blank lines, trimmed, that a file of `index` other than `file` holds
-/// in a row, blank lines skipped, unless the run is in a fenced block that
-/// names that file (by its path or its name) on its opening line or the
-/// non-blank line before it.
-pub(crate) fn find(file: &str, text: &str, catalogs: &[Text], index: &Index) -> Restates {
-    let strings = paragraph::quotes(&paragraph::split(text))
+/// What `file`'s `text`, cut into `paragraphs`, restates: each quoted string
+/// outside fenced code and code spans that a catalog of `catalogs` holds
+/// verbatim as a quoted string, at the line its paragraph starts on; and each
+/// run of [`RUN`] or more non-blank lines, trimmed, that a file of `index`
+/// other than `file` holds in a row, blank lines skipped, unless the run is
+/// in a fenced block that names that file (by its path or its name) on its
+/// opening line or the non-blank line before it.
+pub(crate) fn find(
+    file: &str,
+    text: &str,
+    paragraphs: &[Paragraph],
+    catalogs: &[Text],
+    index: &Index,
+) -> Restates {
+    let strings = paragraph::quotes(paragraphs)
         .into_iter()
         .filter_map(|(line, s)| {
             let literal = serde_json::to_string(&s).expect("a string");
@@ -101,8 +99,10 @@ pub(crate) fn find(file: &str, text: &str, catalogs: &[Text], index: &Index) -> 
     }
 }
 
+/// The runs of `text` copied from a file of `index` other than `file`: each
+/// window of [`RUN`] lines found, one that follows a window found joined to
+/// its run, and one that overlaps a run without following on from it none.
 fn copies(file: &str, text: &str, index: &Index) -> Vec<Restated> {
-    let doc = lines(text);
     let names = fences(text);
     let names_source = |run: &[Line], source: &str| {
         let name = source.rsplit('/').next().unwrap_or(source);
@@ -113,35 +113,30 @@ fn copies(file: &str, text: &str, index: &Index) -> Vec<Restated> {
                 && (whole(named, source) || whole(named, name))
         })
     };
-    let mut source: Vec<Option<(usize, usize)>> = vec![None; doc.len()];
-    for (i, run) in doc.windows(RUN).enumerate() {
+    let mut out: Vec<Restated> = Vec::new();
+    // The window that would join the last run, and the first after its end.
+    let (mut joins, mut after) = (usize::MAX, 0);
+    for (i, run) in lines(text).windows(RUN).enumerate() {
         let key: Vec<&str> = run.iter().map(|l| l.1).collect();
-        source[i] = index.at.get(&key).and_then(|at| {
-            at.iter().copied().find(|&(f, _)| {
-                let path = index.files[f].0;
-                path != file && !names_source(run, path)
-            })
+        let found = index.0.get(&key).and_then(|at| {
+            at.iter()
+                .find(|&&(path, _)| path != file && !names_source(run, path))
         });
-    }
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < doc.len() {
-        let Some((f, at)) = source[i] else {
-            i += 1;
+        let Some((path, line)) = found else {
             continue;
         };
-        let mut end = i + RUN;
-        while end < doc.len() && source[end + 1 - RUN].is_some() {
-            end += 1;
+        let end = run[RUN - 1].0;
+        match out.last_mut() {
+            Some(last) if i == joins => last.end = end,
+            _ if i >= after => out.push(Restated {
+                line: run[0].0,
+                end,
+                what: run[0].1.to_string(),
+                from: format!("{path}:{line}"),
+            }),
+            _ => continue,
         }
-        let (path, lines) = &index.files[f];
-        out.push(Restated {
-            line: doc[i].0,
-            end: doc[end - 1].0,
-            what: doc[i].1.to_string(),
-            from: format!("{path}:{}", lines[at].0),
-        });
-        i = end;
+        (joins, after) = (i + 1, i + RUN);
     }
     out
 }
@@ -243,18 +238,27 @@ impl Measure {
         }
     }
 
-    /// `next` holding `file` at `count`, beside what else it holds it at;
-    /// at 0, not held.
-    fn hold(self, next: &mut Baseline, file: &str, count: usize) {
-        if count == 0 {
-            return;
+    /// `next` holding each document of `found` at its count, as [`ratchet`]
+    /// says, beside what else it holds it at.
+    fn ratchet(
+        self,
+        found: &BTreeMap<&str, Restates>,
+        held: Option<&Baseline>,
+        next: &mut Baseline,
+    ) {
+        for (file, restates) in found {
+            let now = self.of(restates).len();
+            let count = held.map_or(now, |h| self.held(h, file).min(now));
+            if count == 0 {
+                continue;
+            }
+            let entry = next
+                .entry(file.to_string())
+                .or_insert_with(|| Held::Over(Hold::default()));
+            // A document is never a file to rehome, which no kind registers.
+            let Held::Over(h) = entry else { continue };
+            *self.slot(h) = Some(count);
         }
-        let entry = next
-            .entry(file.to_string())
-            .or_insert_with(|| Held::Over(Hold::default()));
-        // A document is never a file to rehome, which no kind registers.
-        let Held::Over(h) = entry else { return };
-        *self.slot(h) = Some(count);
     }
 }
 
@@ -289,11 +293,7 @@ pub(crate) fn ratchet(
     next: &mut Baseline,
 ) {
     for measure in Measure::ALL {
-        for (file, restates) in found {
-            let now = measure.of(restates).len();
-            let count = held.map_or(now, |h| measure.held(h, file).min(now));
-            measure.hold(next, file, count);
-        }
+        measure.ratchet(found, held, next);
     }
 }
 
@@ -302,11 +302,8 @@ pub(crate) fn ratchet(
 /// already adopted as it is.
 pub(crate) fn adopt(found: &BTreeMap<&str, Restates>, next: &mut Baseline) {
     for measure in Measure::ALL {
-        if next.keys().any(|f| measure.held(next, f) > 0) {
-            continue;
-        }
-        for (file, restates) in found {
-            measure.hold(next, file, measure.of(restates).len());
+        if !next.keys().any(|f| measure.held(next, f) > 0) {
+            measure.ratchet(found, None, next);
         }
     }
 }
