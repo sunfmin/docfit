@@ -88,7 +88,7 @@ enum Cmd {
     ///   - `line_too_long`: its line `line` is `size` characters, over `limit`, as above. The fix is to break it at its sentences, one per line, which `docfit fmt` does; a sentence still too long is cut by hand.
     ///   - `unformatted`: `docfit fmt` would change it, first at its line `line`: some line holds more than one sentence. The fix is `docfit fmt <file>`.
     ///   - `broken_pointer`: its line `line` points, as `pointer`, at `missing`, which git does not track. A pointer is:
-    ///     - a backticked repo path: with a `/` in it, or a name ending in one of {const:EXTENSIONS}, and none of a command's space, a glob's `*`, a placeholder's `<>`, a URL's `:` (but a `:<line>` after it), or a leading `/` or `~`. It is read from the repo's top or the document's directory, and is there if either is.
+    ///     - a backticked repo path: with a `/` in it, or a name ending in one of {const:EXTENSIONS}, and none of a command's space, a glob's `*`, a placeholder's `<>`, a URL's `:` (but a `:<line>` after it), or a leading `/` or `~`. A name with a `/` and none of those extensions is a pointer only when its first segment (`src` of `src/a/b`) is something git tracks at the repo's top or in the document's directory; otherwise it is a name, such as a model id `org/model` or a git ref `origin/main`, and is not checked. A pointer is read from the repo's top or the document's directory, and is there if either is.
     ///     - a Markdown link's target, `[text](target)`, read from the document's directory (a leading `/` is the repo's top), without its `#anchor`. A URL (`https:`, `mailto:`) and an anchor alone are not checked.
     ///     - an ADR named by number, `ADR 0007` or `ADR-0007`: there must be a file `{const:ADRS}0007-*`.
     ///
@@ -118,7 +118,7 @@ enum Cmd {
     /// - A design note is off unless the repo turns it on: registering a file as `design-note` is turning it on, for that file.
     /// - A glob matches paths from the repo's top, whatever directory you run it in.
     /// - It measures the working tree, not git's index: an edit not yet staged counts.
-    /// - A pointer is there only if git tracks it: a file the build makes, or one `.gitignore` hides, is `broken_pointer`. Name such a file, or one that does not exist yet, without backticks.
+    /// - A pointer is there only if git tracks it: a file the build makes, or one `.gitignore` hides, is `broken_pointer`. Name such a file, or one that does not exist yet, without backticks; a name with a `/` under no tracked directory, such as `models/` the build makes, is not a pointer and keeps its backticks.
     /// - A document that shrank stays held at the old size until `docfit ratchet` runs: run it and commit the baseline with the change.
     #[command(
         next_help_heading = "Run by the agent, and by the gate",

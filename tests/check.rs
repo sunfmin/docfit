@@ -532,6 +532,26 @@ fn a_backticked_path_that_exists_is_green_and_one_that_does_not_red() {
 }
 
 #[test]
+fn a_backticked_name_with_a_slash_points_only_into_what_git_tracks_at_its_first_segment() {
+    let readme = "Names: `google/siglip2-base-patch16-224`, `origin/proving`, `foo/bar`, `models/`.\n\
+        Gone: `src/missing.rs`, `docs/adr/0099-x.md`, `src/gone`, `foo/bar.rs`.\n";
+    assert_eq!(
+        broken(
+            readme,
+            "Here `adr/`, `agents/x`, `a.md/x`, `../adr/0002`; not `origin/main`.\n"
+        ),
+        [
+            at("README.md", 2, "src/missing.rs -> src/missing.rs"),
+            at("README.md", 2, "docs/adr/0099-x.md -> docs/adr/0099-x.md"),
+            at("README.md", 2, "src/gone -> src/gone"),
+            at("README.md", 2, "foo/bar.rs -> foo/bar.rs"),
+            at("docs/agents/a.md", 1, "a.md/x -> a.md/x"),
+            at("docs/agents/a.md", 1, "../adr/0002 -> ../adr/0002"),
+        ]
+    );
+}
+
+#[test]
 fn a_link_to_a_missing_file_is_red_and_a_url_is_not_checked() {
     let readme = "[a](docs/agents/a.md#top), [`src`](src/), [t](</src/main.rs> \"title\")\n\
         [web](https://example.com/x.md), [mail](mailto:a@b.c), [anchor](#here)\n\
