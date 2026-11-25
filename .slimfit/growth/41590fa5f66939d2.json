@@ -1,0 +1,10 @@
+{
+  "tree": "85b5c7bc4417c4ef7b3dd44b2581748cd639f49f+d1fba762150c532c",
+  "lines": 165,
+  "serves": "docfit#16",
+  "considered": "reused the catalogs glob-list reader for ignore (one globs fn for both keys); reused adopt line-splicing shape for ignore_more; weighed a toml_edit dependency for editing ignore and declined it",
+  "reviewer": "codex:01a21358-91a8-7361-a612-ddc3e611c09e:default",
+  "author": "claude-code:8ab79852-f790-5c23-ba63-ad5ac032e4ff:opus",
+  "cut": "In src/documents.rs, share the non-ignored Markdown iterator between check and sources, update text only when registrations are added and construct Adopted once by moving ignored, and have both ignore_more branches share the final join. In src/kind.rs, keep the byte limits in budget and have the help table render its usize::MAX limit as “none,” deleting the separate bytes method.",
+  "answer": "Made every cut: Config::markdown shared by check and sources; adopt builds Adopted once, registration lines moved to register_more called only when some are added; ignore_more computes one (range, lines) and splices and joins once; Kind::bytes deleted, budget holds usize::MAX for product and the table renders it as none. The rest is the issue: two kinds, the ignore key with defaults, init globs and its refusal, all tested."
+}
