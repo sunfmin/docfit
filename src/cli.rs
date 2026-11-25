@@ -8,7 +8,8 @@ use crate::paragraph::{self, Adr, Home, Known};
 use crate::pointers::{self, Tree};
 use crate::repo;
 use crate::sentences;
-use agent_help::Help;
+use crate::tasks::{self, TaskKind};
+use agent_help::{Help, Topic};
 use clap::{FromArgMatches, Parser, Subcommand};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -317,9 +318,71 @@ enum Cmd {
         #[arg(verbatim_doc_comment)]
         file: PathBuf,
     },
+    /// Lists the repo's document debt as tasks: each file the baseline holds to rehome, and each document it holds over its budget, with the steps that pay it.
+    ///
+    /// ## When to run it
+    ///
+    /// To find the next document to move to its homes. A factorium `[idle]` tasks line runs `docfit next --all` and files the first task of each kind as an issue, so the debt a repo adopted docfit with becomes work, one file at a time: `tasks = "slimfit --version && truefit --version && docfit --version && slimfit next --all && truefit next --all && docfit next --all"`. It reads git and a few files, so it takes about a second.
+    ///
+    /// ## What it reads and writes
+    ///
+    /// It reads what `docfit check` reads, and, for each task's file, what `docfit where` reads. It writes nothing.
+    ///
+    /// ## What it answers
+    ///
+    /// The shape of `slimfit next --all`'s and `truefit next --all`'s:
+    ///
+    /// - `by`: the docfit that read them, `docfit <version>`.
+    /// - `counts`: how many tasks of each kind there are.
+    /// - `tasks`, with `--all`: every task, rehome first, then over-budget, each in path order; without it, `task`: the first, or null. Each has:
+    ///   - `kind`: `rehome`, a file the baseline holds to rehome that is still registered under no kind; or `over-budget`, a document the baseline holds over its budget that is still over it.
+    ///   - `summary`: the file, and what it is.
+    ///   - `files`: the one file, from the repo's top.
+    ///   - `steps`: how to move its content to its homes; the text `docfit help rehome` prints.
+    ///   - `accept`: what holds it done: after `docfit ratchet`, `docfit check` exits {const:EXIT_OK} and `{const:BASELINE}` no longer holds the file (gone, registered under a kind, or within its budget).
+    ///   - `evidence`: `size` (a file's bytes; a document's `bytes` and `line`), `held` (what the baseline holds it at), for a document its `budget`, and `where`: `docfit where`'s answer on the file.
+    /// - `notes`: what was not looked for; without a baseline nothing is held, so there is no task.
+    /// - `next`: do the first task by its steps, or that there is nothing to do.
+    ///
+    /// For example, with `SPEC.md` held to rehome (`where` cut short):
+    ///
+    /// ```json
+    /// {
+    ///   "by": "docfit 0.1.0",
+    ///   "counts": { "rehome": 1, "over-budget": 0 },
+    ///   "tasks": [
+    ///     { "kind": "rehome", "summary": "`SPEC.md` (15360 bytes) is registered under no kind, held to rehome: move its content to its homes", "files": ["SPEC.md"], "steps": "…", "accept": "…", "evidence": { "size": 15360, "held": 15360, "where": { "file": "SPEC.md", "kind": null, "paragraphs": ["…"] } } }
+    ///   ],
+    ///   "notes": [],
+    ///   "next": "do the first task by its steps, then its accept, and commit; then `docfit next` again"
+    /// }
+    /// ```
+    ///
+    /// It exits {const:EXIT_OK} with tasks or without.
+    ///
+    /// ## What it may refuse
+    ///
+    /// What `docfit check` refuses, and what `docfit where` refuses on a task's file; it exits {const:EXIT_ERROR}.
+    ///
+    /// ## What trips you up
+    ///
+    /// - A file the baseline holds that is gone, registered since, or back within its budget is no task: `docfit check`'s `next` says to run `docfit ratchet`, which drops it.
+    /// - A file is a task until `docfit ratchet` drops it from the baseline: cutting it is not enough, commit the baseline with the change.
+    #[command(
+        next_help_heading = "Run by the agent, and by factorium's idle work",
+        verbatim_doc_comment
+    )]
+    Next {
+        /// Every task, as `tasks`, rather than the first.
+        #[arg(long, verbatim_doc_comment)]
+        all: bool,
+        /// The repository to read (default: the one containing the current directory).
+        #[arg(long, verbatim_doc_comment)]
+        repo: Option<PathBuf>,
+    },
     /// Shows one topic of this manual, or all of it.
     ///
-    /// `docfit help all` shows the whole manual.
+    /// `docfit help rehome` shows how to move a document's content to its homes, the steps of every `docfit next` task; `docfit help all` shows the whole manual.
     #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
     Help {
         /// The topic, or `all`.
@@ -328,8 +391,26 @@ enum Cmd {
     },
 }
 
+/// How to move a document's content to its homes, and so pay a `docfit next` task: a file held to rehome, or a document over its budget. These are the steps of every task `docfit next` answers.
+///
+/// 1. Run `docfit where <file>` and go through its paragraphs one by one. Each `home` is a suggestion; the features beside it are there to judge it by.
+/// 2. Put each paragraph in its home:
+///    - Code or strings (`delete`): delete it; the code, the catalog and the screen tests already say it.
+///    - A decision (`adr`): an ADR, the one it names if that exists, else a new one, written as the repo's domain docs say.
+///    - A number (`evidence`): the ADR of the decision it supports, with the command that measures it. A number that only proves the work was accepted goes in a comment on the issue you are working, not in the repo.
+///    - A local tracker reference, `#N` or `<checkout>#N` (`replace`): replace it with what it points at (the person's words with who, date and where; or the command and what it printed), or delete it.
+///    - A pointer (`keep`): keep it, in a document of its kind.
+///    - A promise: an ADR; where the repo has truefit, register it there too.
+///    - Anything else (`judge`): move it to the document whose kind holds it (`docfit --help`), or delete it.
+/// 3. The commit that removes the content carries the map in its message: for each paragraph, its first words, then its home, which is one of: `file:line` where it now is; the ADR; the code symbol, catalog key or screen test that already says it; or "nowhere, because <it restated X>". So whoever finds the removed text in `git log` reads the map in the same commit. The map lives only in that commit message, never in a file of the repo: it is the signpost of one move, and the content's new homes are found without it. Like everything the repo keeps, it cites no issue of the local tracker.
+/// 4. Run `docfit ratchet`, then `docfit check`, and commit the baseline with the change: the task is done once the baseline no longer holds the file.
+#[derive(Topic)]
+#[topic(name = "rehome")]
+struct RehomeTopic;
+
 pub(crate) fn help() -> Help {
     Help::new(<Cli as clap::CommandFactory>::command())
+        .topic::<RehomeTopic>()
         .constant("KINDS", Kind::table())
         .constant("HOMES", Home::table())
         .constant("BASELINE", BASELINE)
@@ -362,6 +443,7 @@ pub(crate) fn run(args: impl IntoIterator<Item = std::ffi::OsString>) -> (String
         Cmd::Ratchet { repo } => ratchet(repo).unwrap_or_else(refused),
         Cmd::Fmt { repo, files } => fmt(repo, files).unwrap_or_else(refused),
         Cmd::Where { file } => place(&file).unwrap_or_else(refused),
+        Cmd::Next { all, repo } => next(repo, all).unwrap_or_else(refused),
         Cmd::Help { topic: None } => (help.index().expect("checked"), EXIT_OK),
         Cmd::Help { topic: Some(topic) } => match help.topic_help(&topic) {
             Ok(markdown) => (markdown, EXIT_OK),
@@ -666,6 +748,63 @@ fn fmt(repo: Option<PathBuf>, files: Vec<String>) -> Result<(String, i32), Vec<R
     ))
 }
 
+fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>> {
+    let top = top(repo)?;
+    let seen = Seen::at(&top)?;
+    let texts = read(&top, &seen.answer, &[])?;
+    let docs = measured(&texts);
+    let strays = strays(&top, &seen.answer)?;
+    let (held, notes) = match baseline(&top)? {
+        Some(held) => (held, Vec::<String>::new()),
+        None => (
+            Baseline::new(),
+            vec![format!(
+                "no {BASELINE}: nothing is held, so no debt is listed; `docfit init` adopts docfit and writes it"
+            )],
+        ),
+    };
+    let steps = RehomeTopic::MARKDOWN;
+    let mut tasks = Vec::new();
+    for debt in tasks::debt(&docs, &strays, &held) {
+        let text = tracked_text(&top, debt.file).map_err(|r| vec![r])?;
+        let mut evidence = debt.evidence;
+        evidence["where"] = seen.place(debt.file, &text);
+        tasks.push(json!({
+            "kind": debt.kind.name(), "summary": debt.summary, "files": [debt.file],
+            "steps": steps,
+            "accept": format!(
+                "`docfit ratchet`, then `docfit check` exits {EXIT_OK} and {BASELINE} no longer holds `{}`",
+                debt.file
+            ),
+            "evidence": evidence,
+        }));
+    }
+    let counts: serde_json::Map<String, Value> = TaskKind::ALL
+        .iter()
+        .map(|k| {
+            (
+                k.name().to_string(),
+                json!(tasks.iter().filter(|t| t["kind"] == k.name()).count()),
+            )
+        })
+        .collect();
+    let then = if tasks.is_empty() {
+        "nothing to do: the baseline holds no document over its budget and no file to rehome"
+    } else {
+        "do the first task by its steps, then its accept, and commit; then `docfit next` again"
+    };
+    let mut answer = json!({
+        "by": format!("docfit {}", env!("CARGO_PKG_VERSION")),
+        "counts": counts, "notes": notes, "next": then,
+    });
+    if all {
+        answer["tasks"] = json!(tasks);
+    } else {
+        answer["task"] = tasks.into_iter().next().unwrap_or(Value::Null);
+    }
+    Ok((pretty(&answer), EXIT_OK))
+}
+
 fn place(file: &Path) -> Result<(String, i32), Vec<Refusal>> {
     let unreadable = |e: std::io::Error| {
         vec![refusal(
@@ -682,65 +821,89 @@ fn place(file: &Path) -> Result<(String, i32), Vec<Refusal>> {
         .expect("git's top holds the file")
         .to_string_lossy()
         .into_owned();
-    let (answer, tracked, config) = registered_at(&top)?;
-    let paragraphs = paragraph::split(&text);
-    let (spans, quoted) = paragraph::candidates(&paragraphs);
-    let (paths, others): (BTreeSet<String>, BTreeSet<String>) = spans
-        .into_iter()
-        .partition(|s| paragraph::is_path(s, &tracked));
-    let code: Vec<String> = tracked
-        .iter()
-        .filter(|f| !f.ends_with(".md"))
-        .filter_map(|f| std::fs::read(top.join(f)).ok())
-        .filter(|bytes| !bytes.iter().take(8000).any(|b| *b == 0))
-        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-        .collect();
-    let catalogs = catalogs(&top, &config, &tracked)?;
-    let strings = quoted
-        .into_iter()
-        .filter(|q| {
-            let literal = serde_json::to_string(q).expect("a string");
-            catalogs.iter().any(|c| c.contains(&literal))
+    let seen = Seen::at(&top)?;
+    Ok((pretty(&seen.place(&name, &text)), EXIT_OK))
+}
+
+/// What `docfit where` reads of a repo, once, to place any of its documents:
+/// its registered documents, the paths git tracks, the text of every tracked
+/// file outside Markdown, its string catalogs, and its ADRs.
+struct Seen {
+    answer: Answer,
+    tracked: Vec<String>,
+    code: Vec<String>,
+    catalogs: Vec<String>,
+    adrs: Vec<Adr>,
+}
+
+impl Seen {
+    fn at(top: &Path) -> Result<Seen, Vec<Refusal>> {
+        let (answer, tracked, config) = registered_at(top)?;
+        let code: Vec<String> = tracked
+            .iter()
+            .filter(|f| !f.ends_with(".md"))
+            .filter_map(|f| std::fs::read(top.join(f)).ok())
+            .filter(|bytes| !bytes.iter().take(8000).any(|b| *b == 0))
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .collect();
+        let catalogs = catalogs(top, &config, &tracked)?;
+        let adrs = answer
+            .documents
+            .iter()
+            .filter(|(_, d)| d.kind == Kind::Adr)
+            .map(|(f, _)| tracked_text(top, f).map(|text| Adr::read(f, &text)))
+            .collect::<Result<_, _>>()
+            .map_err(|r| vec![r])?;
+        Ok(Seen {
+            answer,
+            tracked,
+            code,
+            catalogs,
+            adrs,
         })
-        .collect();
-    let adrs = answer
-        .documents
-        .iter()
-        .filter(|(_, d)| d.kind == Kind::Adr)
-        .map(|(f, _)| tracked_text(&top, f).map(|text| Adr::read(f, &text)))
-        .collect::<Result<_, _>>()
-        .map_err(|r| vec![r])?;
-    let known = Known {
-        words: paragraph::words(others.iter().map(String::as_str), &code),
-        paths,
-        strings,
-        adrs,
-    };
-    let placed: Vec<_> = paragraphs
-        .iter()
-        .map(|p| paragraph::place(p, &known))
-        .collect();
-    let (mut homes, mut each) = (serde_json::Map::new(), Vec::new());
-    for home in Home::ALL {
-        let n = placed.iter().filter(|p| p.home == home).count();
-        homes.insert(home.name().to_string(), json!(n));
-        each.push(format!("{} {n}", home.name()));
     }
-    let next = if placed.is_empty() {
-        format!("nothing to place: `{name}` has no paragraph")
-    } else {
-        format!(
-            "move each paragraph to its home ({}; `docfit where --help` says what each is), then run `docfit check`",
-            each.join(", ")
-        )
-    };
-    let kind = answer.documents.get(&name).map(|d| d.kind.name());
-    Ok((
-        pretty(
-            &json!({ "file": name, "kind": kind, "paragraphs": placed, "homes": homes, "next": next }),
-        ),
-        EXIT_OK,
-    ))
+
+    /// `docfit where`'s answer on the document `name`, from the repo's top, of `text`.
+    fn place(&self, name: &str, text: &str) -> Value {
+        let paragraphs = paragraph::split(text);
+        let (spans, quoted) = paragraph::candidates(&paragraphs);
+        let (paths, others): (BTreeSet<String>, BTreeSet<String>) = spans
+            .into_iter()
+            .partition(|s| paragraph::is_path(s, &self.tracked));
+        let strings = quoted
+            .into_iter()
+            .filter(|q| {
+                let literal = serde_json::to_string(q).expect("a string");
+                self.catalogs.iter().any(|c| c.contains(&literal))
+            })
+            .collect();
+        let known = Known {
+            words: paragraph::words(others.iter().map(String::as_str), &self.code),
+            paths,
+            strings,
+            adrs: &self.adrs,
+        };
+        let placed: Vec<_> = paragraphs
+            .iter()
+            .map(|p| paragraph::place(p, &known))
+            .collect();
+        let (mut homes, mut each) = (serde_json::Map::new(), Vec::new());
+        for home in Home::ALL {
+            let n = placed.iter().filter(|p| p.home == home).count();
+            homes.insert(home.name().to_string(), json!(n));
+            each.push(format!("{} {n}", home.name()));
+        }
+        let next = if placed.is_empty() {
+            format!("nothing to place: `{name}` has no paragraph")
+        } else {
+            format!(
+                "move each paragraph to its home ({}; `docfit where --help` says what each is), then run `docfit check`",
+                each.join(", ")
+            )
+        };
+        let kind = self.answer.documents.get(name).map(|d| d.kind.name());
+        json!({ "file": name, "kind": kind, "paragraphs": placed, "homes": homes, "next": next })
+    }
 }
 
 /// The text of each tracked file `catalogs` matches; every glob must match one.

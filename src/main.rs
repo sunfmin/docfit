@@ -9,6 +9,7 @@ mod paragraph;
 mod pointers;
 mod repo;
 mod sentences;
+mod tasks;
 
 agent_help::binary!("docfit");
 
