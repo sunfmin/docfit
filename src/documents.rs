@@ -202,10 +202,7 @@ pub(crate) fn adopt(
         .parse::<toml::Table>()
         .is_ok_and(|t| !t.contains_key(TABLE))
     {
-        if !text.is_empty() && !text.ends_with('\n') {
-            text.push('\n');
-        }
-        text.push_str(&format!("\n[{TABLE}]\n"));
+        text = format!("{}\n\n[{TABLE}]\n", text.trim_end());
     }
     let answer = check(&entries(&text)?, files);
     let added: BTreeMap<String, Kind> = answer
