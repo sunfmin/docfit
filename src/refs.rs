@@ -152,6 +152,10 @@ mod tests {
             [(2, "rollmind#38".into()), (2, "lore#7".into())]
         );
         assert_eq!(refs("`rollmind#1`"), [(1, "rollmind#1".into())]);
+        assert_eq!(
+            refs("https://x.example/a rollmind#2 (rollmind#3"),
+            [(1, "rollmind#2".into()), (1, "rollmind#3".into())]
+        );
     }
 
     #[test]

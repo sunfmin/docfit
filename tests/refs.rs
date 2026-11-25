@@ -41,6 +41,11 @@ fn a_new_ref_in_a_code_comment_is_red_naming_its_line_and_the_ref() {
         "{fix}"
     );
     assert_eq!(answer["next"], fault["fix"]);
+    let (_, answer) = docfit(dir.path(), &["ratchet"]);
+    assert_eq!(
+        (&answer["changed"], &answer["baseline"]),
+        (&json!(false), &json!({}))
+    );
 }
 
 #[test]
@@ -142,14 +147,20 @@ fn init_holds_each_files_refs_at_adoption_so_check_is_green_that_day() {
 fn init_on_a_baseline_holding_no_refs_adopts_them_and_once_held_leaves_them() {
     let dir = repo(&[
         ("docfit.toml", ON),
-        (".docfit/baseline.json", "{}\n"),
+        (
+            ".docfit/baseline.json",
+            "{\"README.md\": {\"bytes\": 40}}\n",
+        ),
         ("README.md", "r\n"),
         ("src/a.rs", "// rollmind#1\n"),
     ]);
     let (code, answer) = docfit(dir.path(), &["init"]);
     assert_eq!(code, 0, "{answer}");
     assert_eq!(answer["changed"], true);
-    assert_eq!(answer["baseline"], json!({"src/a.rs": {"local_refs": 1}}));
+    assert_eq!(
+        answer["baseline"],
+        json!({"README.md": {"bytes": 40}, "src/a.rs": {"local_refs": 1}})
+    );
     std::fs::write(dir.path().join("src/b.rs"), "// rollmind#2\n").unwrap();
     common::git(dir.path(), &["add", "-A"]);
     let (_, answer) = docfit(dir.path(), &["init"]);
