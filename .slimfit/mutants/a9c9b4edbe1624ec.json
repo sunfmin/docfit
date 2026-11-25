@@ -1,0 +1,6 @@
+{
+  "tree": "5e99c61fd0ee251b74ab17f7de520e3ef08bdb07+d1fba762150c532c",
+  "picker": "codex:01a21321-d397-7b23-bfa8-978534e799c5:default",
+  "author": "claude-code:0fad7ac3-7f7d-5632-ae13-c299ef780d03:opus",
+  "none": "The new test checks the exact stored pointer, suppression of the held fault, reporting of a new fault, and ratchet removal after repair, so every buildable candidate would break an asserted result."
+}
