@@ -187,6 +187,22 @@ fn init_holds_restatements_on_a_baseline_that_holds_none_yet() {
 }
 
 #[test]
+fn init_holds_restatements_beside_an_unrelated_hold() {
+    let dir = fixture("# R\n\nTap \"Save photo\".\n");
+    std::fs::write(
+        dir.path().join(".docfit/baseline.json"),
+        "{\"NOTES.md\": {\"local_refs\": 1}}\n",
+    )
+    .unwrap();
+    let (_, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(
+        answer["baseline"]["README.md"],
+        json!({ "strings": 1 }),
+        "{answer}"
+    );
+}
+
+#[test]
 fn where_lists_what_check_counts() {
     let both =
         "# R\n\nTap \"Save photo\".\n\nlet answer = check(repo);\nprint(answer);\nexit(code);\n";

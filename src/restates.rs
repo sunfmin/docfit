@@ -100,8 +100,7 @@ pub(crate) fn find(
 }
 
 /// The runs of `text` copied from a file of `index` other than `file`: each
-/// window of [`RUN`] lines found, one that follows a window found joined to
-/// its run, and one that overlaps a run without following on from it none.
+/// window of [`RUN`] lines found, joined to the run it overlaps.
 fn copies(file: &str, text: &str, index: &Index) -> Vec<Restated> {
     let names = fences(text);
     let names_source = |run: &[Line], source: &str| {
@@ -114,8 +113,8 @@ fn copies(file: &str, text: &str, index: &Index) -> Vec<Restated> {
         })
     };
     let mut out: Vec<Restated> = Vec::new();
-    // The window that would join the last run, and the first after its end.
-    let (mut joins, mut after) = (usize::MAX, 0);
+    // The first window after the last run's end.
+    let mut after = 0;
     for (i, run) in lines(text).windows(RUN).enumerate() {
         let key: Vec<&str> = run.iter().map(|l| l.1).collect();
         let found = index.0.get(&key).and_then(|at| {
@@ -127,16 +126,15 @@ fn copies(file: &str, text: &str, index: &Index) -> Vec<Restated> {
         };
         let end = run[RUN - 1].0;
         match out.last_mut() {
-            Some(last) if i == joins => last.end = end,
-            _ if i >= after => out.push(Restated {
+            Some(last) if i < after => last.end = end,
+            _ => out.push(Restated {
                 line: run[0].0,
                 end,
                 what: run[0].1.to_string(),
                 from: format!("{path}:{line}"),
             }),
-            _ => continue,
         }
-        (joins, after) = (i + 1, i + RUN);
+        after = i + RUN;
     }
     out
 }
@@ -304,6 +302,51 @@ pub(crate) fn adopt(found: &BTreeMap<&str, Restates>, next: &mut Baseline) {
     for measure in Measure::ALL {
         if !next.keys().any(|f| measure.held(next, f) > 0) {
             measure.ratchet(found, None, next);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn copies_of(doc: &str, source: &str) -> Vec<(usize, usize)> {
+        let texts = [Text {
+            path: "src/a.rs".into(),
+            text: source.into(),
+        }];
+        copies("README.md", doc, &Index::new(&texts))
+            .iter()
+            .map(|c| (c.line, c.end))
+            .collect()
+    }
+
+    #[test]
+    fn windows_that_overlap_join_one_run() {
+        assert_eq!(copies_of("a\nb\nc\nd\n", "a\nb\nc\nd\n"), [(1, 4)]);
+        // `b c d` is not in the source, `c d e` is: one run, lines 1 to 5.
+        assert_eq!(
+            copies_of("a\nb\nc\nd\ne\n", "a\nb\nc\n\nz\nc\nd\ne\n"),
+            [(1, 5)]
+        );
+        assert_eq!(
+            copies_of("a\nb\nc\nx\ny\nz\nq\n", "a\nb\nc\n\nx\ny\nz\n"),
+            [(1, 6)]
+        );
+        assert_eq!(
+            copies_of("a\nb\nc\n- \na\nb\nc\n", "a\nb\nc\n"),
+            [(1, 3), (5, 7)]
+        );
+    }
+
+    #[test]
+    fn a_fence_names_its_source_only_inside_it_and_by_a_whole_name() {
+        let doc = "From `src/a.rs`:\n```\na\nb\nc\n```\n\na\nb\nc\n";
+        assert_eq!(copies_of(doc, "a\nb\nc\n"), [(8, 10)]);
+        for named in ["`xa.rs`", "`a.rsx`", "`src/a.rs`", "`a.rs`"] {
+            let doc = format!("From {named}:\n```\na\nb\nc\n```\n");
+            let exempt = !named.contains('x');
+            assert_eq!(copies_of(&doc, "a\nb\nc\n").is_empty(), exempt, "{named}");
         }
     }
 }
