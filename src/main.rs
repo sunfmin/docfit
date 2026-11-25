@@ -7,6 +7,7 @@ mod documents;
 mod kind;
 mod pointers;
 mod repo;
+mod sentences;
 
 agent_help::binary!("docfit");
 

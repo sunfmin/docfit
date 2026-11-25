@@ -1,0 +1,39 @@
+{
+  "tree": "6895ec030464d0df64450dc8a1829c01908f9d67+d1fba762150c532c",
+  "picker": "codex:01a21303-cab2-7f82-8b3c-e8af96f8f7ee:default",
+  "author": "claude-code:502648f8-427c-5252-a9ea-1dbe8274bccc:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/sentences.rs:162:25: replace match guard open == len with false in sentences",
+        "why": "The inline-code test ends with a single sentence, so it misses a valid closing backtick suppressing all later prose breaks.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/sentences.rs:32:17: replace && with || in format",
+        "why": "The fence fixture puts no prose between the short tilde run and the valid closer, so closing the fence too early can go undetected.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/sentences.rs:90:15: replace > with >= in list_marker",
+        "why": "The tests omit prose such as `One. 2.0 works.`, where accepting an ordered marker without a following space suppresses a valid break.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/sentences.rs:123:68: replace || with && in starts_block",
+        "why": "The block-start test omits sentence breaks that would move an `===` or `---` underline onto its own line.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/sentences.rs:114:69: replace && with || in verbatim",
+        "why": "The link-definition fixture checks a genuine definition and leaves bracket-led prose with multiple sentences untested.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}
