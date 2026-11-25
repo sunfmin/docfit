@@ -252,9 +252,9 @@ impl Measure {
         let entry = next
             .entry(file.to_string())
             .or_insert_with(|| Held::Over(Hold::default()));
-        if let Held::Over(h) = entry {
-            *self.slot(h) = Some(count);
-        }
+        // A document is never a file to rehome, which no kind registers.
+        let Held::Over(h) = entry else { return };
+        *self.slot(h) = Some(count);
     }
 }
 
