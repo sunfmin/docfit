@@ -97,6 +97,20 @@ mod tests {
     use crate::budget::Hold;
 
     #[test]
+    fn a_stray_the_baseline_does_not_hold_to_rehome_is_no_task() {
+        let fault = json!({});
+        let strays = [Stray {
+            file: "NEW.md",
+            bytes: 9,
+            fault: &fault,
+        }];
+        assert_eq!(debt(&[], &strays, &Baseline::new()), vec![]);
+        let mut baseline = Baseline::new();
+        baseline.insert("NEW.md".into(), Held::Rehome(Rehome { rehome: 9 }));
+        assert_eq!(debt(&[], &strays, &baseline)[0].kind, TaskKind::Rehome);
+    }
+
+    #[test]
     fn a_held_measure_back_within_budget_is_no_debt() {
         let (budget, size) = (Size { bytes: 10, line: 5 }, Size { bytes: 8, line: 9 });
         let docs = [Measured {
