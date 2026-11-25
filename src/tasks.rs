@@ -26,7 +26,7 @@ pub(crate) fn debt<'a>(
 ) -> [(&'static str, Vec<Debt<'a>>); 2] {
     let mut rehome = Vec::new();
     for stray in strays {
-        if let Some(Held::Rehome(Rehome { rehome: held })) = baseline.get(stray.file) {
+        if let Some(Held::Rehome(Rehome { rehome: held, .. })) = baseline.get(stray.file) {
             rehome.push(Debt {
                 file: stray.file,
                 summary: format!(
@@ -86,7 +86,13 @@ mod tests {
         }];
         assert_eq!(debt(&[], &strays, &Baseline::new())[0].1, vec![]);
         let mut baseline = Baseline::new();
-        baseline.insert("NEW.md".into(), Held::Rehome(Rehome { rehome: 9 }));
+        baseline.insert(
+            "NEW.md".into(),
+            Held::Rehome(Rehome {
+                rehome: 9,
+                local_refs: None,
+            }),
+        );
         assert_eq!(debt(&[], &strays, &baseline)[0].1[0].file, "NEW.md");
     }
 

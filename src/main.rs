@@ -7,6 +7,7 @@ mod documents;
 mod kind;
 mod paragraph;
 mod pointers;
+mod refs;
 mod repo;
 mod tasks;
 
