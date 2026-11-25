@@ -6,17 +6,17 @@ mod common;
 use common::{docfit, repo};
 use serde_json::{Value, json};
 
-const CONFIG: &str = "catalogs = [\"App/**/*.xcstrings\"]\n\n[documents]\n\"SPEC.md\" = \"readme\"\n\"NOTES.md\" = \"readme\"\n\"docs/adr/*.md\" = \"adr\"\n\"docs/agents/*.md\" = \"agent\"\n";
+const CONFIG: &str = "catalogs = [\"App/**/*.xcstrings\"]\n\n[documents]\n\"SPEC.md\" = { kind = \"readme\", line = 400 }\n\"NOTES.md\" = \"readme\"\n\"docs/adr/*.md\" = \"adr\"\n\"docs/agents/*.md\" = \"agent\"\n";
 
 const CATALOG: &str = r#"{ "strings": { "save": { "localizations": { "zh-Hans": { "stringUnit": { "value": "保存" } }, "en": { "stringUnit": { "value": "Cancel" } } } } } }"#;
 
 const SPEC: &str = "# Spec
 
-The answer is built by `Answer` and read back by `parse_config`, while `Missing` and `docfit check --help` are not code, and the words here run on long enough.
+The answer is built by `Answer` and read back by `parse_config`, while `Missing` and `docfit check --help` are not code, `Answer` said twice is one, `answer::Answer` is code but `answer::Answ` is no whole word, and the words here run on long enough.
 
-Tap 「保存」 and then \"Cancel\" to leave the page; \"Nowhere\" is a string no catalog holds, so it does not count.
+Tap 「保存」 and then \"Cancel\" to leave the page; \"Nowhere\" is a string no catalog holds, so it does not count, nor does a stray “ quote.
 
-Startup took 1.5 s and 63 MiB (#12, rollmind#146), down from 70 分钟, at 100% of 112×112 tiles.
+Startup took 1.5 s and 63 MiB (#12, rollmind#146), down from 70 分钟, at 100% of 112×112 tiles; #notes and #12a are no issue.
 
 We parse the table by hand instead of with a crate, because the build stays small.
 
@@ -24,7 +24,7 @@ We chose globs instead of regular expressions because ADR 0002 says so.
 
 See [the tracker](docs/agents/tracker.md).
 
-This paragraph says nothing a machine can see.
+This paragraph [sic] says nothing a machine can see.
 
 - one item restating `Answer`
   and its second line
@@ -46,7 +46,7 @@ fn fixture() -> tempfile::TempDir {
         ("App/Base/Localizable.xcstrings", CATALOG),
         (
             "src/answer.rs",
-            "struct Answer;\nfn parse_config() {}\n// docfit check --help\n",
+            "use crate::answer::Answer;\nstruct Answer;\nfn parse_config() {}\n// docfit check --help\n",
         ),
         (
             "docs/adr/0002-globs-for-documents.md",
@@ -76,7 +76,7 @@ fn each_paragraph_gets_its_features_and_its_suggested_home() {
 
     assert_eq!(
         p[0]["code"],
-        json!({ "count": 2, "found": ["Answer", "parse_config"] })
+        json!({ "count": 3, "found": ["Answer", "parse_config", "answer::Answer"] })
     );
     assert_eq!(p[0]["home"], "delete");
     assert!(
@@ -210,4 +210,34 @@ fn without_catalogs_no_string_is_found() {
     let (code, answer) = docfit(dir.path(), &["where", "SPEC.md"]);
     assert_eq!(code, 0, "{answer}");
     assert_eq!(paragraphs(&answer)[1]["strings"]["count"], 0);
+}
+
+#[test]
+fn an_empty_document_has_nothing_to_place() {
+    let dir = fixture();
+    std::fs::write(dir.path().join("SPEC.md"), "# Only a heading\n").unwrap();
+    let (code, answer) = docfit(dir.path(), &["where", "SPEC.md"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["paragraphs"], json!([]));
+    assert_eq!(
+        answer["next"],
+        "nothing to place: `SPEC.md` has no paragraph"
+    );
+}
+
+#[test]
+fn a_catalog_or_an_adr_it_cannot_read_is_refused_with_its_fix() {
+    for file in [
+        "App/Base/Localizable.xcstrings",
+        "docs/adr/0002-globs-for-documents.md",
+    ] {
+        let dir = fixture();
+        std::fs::write(dir.path().join(file), [0xff, 0xfe]).unwrap();
+        let (code, answer) = docfit(dir.path(), &["where", "SPEC.md"]);
+        assert_eq!(code, 2, "{file}: {answer}");
+        assert_eq!(
+            answer["error"][0]["fix"],
+            format!("restore `{file}` as UTF-8 text, or `git rm` it")
+        );
+    }
 }
