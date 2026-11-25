@@ -64,6 +64,11 @@ pub(crate) fn check(file: &str, text: &str, tree: &Tree) -> Vec<Value> {
         for (i, span) in line.split('`').enumerate() {
             if i % 2 == 1 {
                 if let Some(path) = repo_path(span) {
+                    let root = first_segment(path);
+                    let rooted = |base| resolve(base, root).is_some_and(|r| tree.holds(&r));
+                    if !named_file(path) && !rooted("") && !rooted(dir) {
+                        continue;
+                    }
                     let (top, here) = (resolve("", path), resolve(dir, path));
                     let holds = [&top, &here]
                         .iter()
@@ -104,10 +109,30 @@ fn repo_path(span: &str) -> Option<&str> {
         _ => span,
     };
     let named = |c: char| c.is_alphanumeric() || "._-/+".contains(c);
-    let (stem, extension) = path.rsplit_once('.').unwrap_or((path, ""));
-    let path_like = path.contains('/')
-        || (!stem.is_empty() && !stem.ends_with('/') && EXTENSIONS.contains(&extension));
+    let path_like = path.contains('/') || named_file(path);
     (path_like && path.chars().all(named) && !path.starts_with(['/', '-'])).then_some(path)
+}
+
+/// Whether `path` names a file by one of the [`EXTENSIONS`]: such a name is a
+/// pointer wherever it is, and any other is one only from a [`first_segment`]
+/// git tracks.
+fn named_file(path: &str) -> bool {
+    let (stem, extension) = path.rsplit_once('.').unwrap_or((path, ""));
+    !stem.is_empty() && !stem.ends_with('/') && EXTENSIONS.contains(&extension)
+}
+
+/// `path` up to its first segment that names something, past any `.` or
+/// `..`: `src` of `src/a/b`, `../adr` of `../adr/0002`.
+fn first_segment(path: &str) -> &str {
+    let mut end = 0;
+    for part in path.split('/') {
+        end += part.len();
+        if !matches!(part, "" | "." | "..") {
+            break;
+        }
+        end += 1;
+    }
+    &path[..end.min(path.len())]
 }
 
 /// The local targets of the Markdown links in `text`: `[..](target)`, without
