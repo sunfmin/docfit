@@ -4,7 +4,7 @@
 mod common;
 
 use common::{docfit, isolated, repo};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::process::Command;
 
 const CODE: &str = "fn main() {\n    let answer = check(repo);\n    print(answer);\n}\n";
@@ -126,18 +126,32 @@ fn the_steps_are_the_text_help_rehome_prints_and_put_the_map_in_the_commit() {
 
 #[test]
 fn a_task_paid_and_ratcheted_is_gone() {
+    let none =
+        json!({ "rehome": 0, "over-budget": 0, "local-refs": 0, "restates": 0, "measurement": 0 });
     let dir = indebted();
     std::fs::remove_file(dir.path().join("SPEC.md")).unwrap();
     std::fs::write(dir.path().join("README.md"), "# Readme\n").unwrap();
     common::git(dir.path(), &["add", "-A"]);
+    // Held, but paid: no task even before `docfit ratchet` drops it.
+    assert_eq!(docfit(dir.path(), &["next", "--all"]).1["counts"], none);
     assert_eq!(docfit(dir.path(), &["ratchet"]).0, 0);
     let (code, answer) = docfit(dir.path(), &["next", "--all"]);
     assert_eq!(code, 0);
     assert_eq!(answer["tasks"], json!([]));
-    assert_eq!(
-        answer["counts"],
-        json!({ "rehome": 0, "over-budget": 0, "local-refs": 0, "restates": 0, "measurement": 0 })
-    );
+    assert_eq!(answer["counts"], none);
+    // Found anew, but not held: `docfit check` is red on it, and it is no task.
+    let readme = format!("# Readme\n\nIt runs in 2 min, as proj#8 asked.\n\n{CODE}");
+    std::fs::write(dir.path().join("README.md"), readme).unwrap();
+    let (code, check) = docfit(dir.path(), &["check"]);
+    assert_eq!(code, 1);
+    let faults: Vec<&Value> = check["faults"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| &f["fault"])
+        .collect();
+    assert_eq!(faults, ["local_ref", "restates", "measurement"], "{check}");
+    assert_eq!(docfit(dir.path(), &["next", "--all"]).1["counts"], none);
 }
 
 #[test]
