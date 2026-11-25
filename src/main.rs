@@ -5,6 +5,7 @@ mod budget;
 mod cli;
 mod documents;
 mod kind;
+mod pointers;
 mod repo;
 
 agent_help::binary!("docfit");
