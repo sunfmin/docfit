@@ -1,7 +1,9 @@
 //! Decides `docfit next`: the debt the baseline holds, as tasks. A file held
 //! to rehome that is still registered under no kind is a `rehome` task; a
 //! document held over its budget that is still over it is an `over-budget`
-//! task. Pure: the files measured and the baseline arrive as arguments.
+//! task. A file held at a count of local refs, restatements or measurements
+//! that still holds one is a task too, decided where its count is. Pure: the
+//! files measured and the baseline arrive as arguments.
 
 use crate::budget::{Baseline, Held, Measured, Rehome, Size, Stray};
 use serde_json::{Value, json};
@@ -23,7 +25,7 @@ pub(crate) fn debt<'a>(
     docs: &[Measured<'a>],
     strays: &[Stray<'a>],
     baseline: &Baseline,
-) -> [(&'static str, Vec<Debt<'a>>); 2] {
+) -> [Vec<Debt<'a>>; 2] {
     let mut rehome = Vec::new();
     for stray in strays {
         if let Some(Held::Rehome(Rehome { rehome: held, .. })) = baseline.get(stray.file) {
@@ -68,7 +70,7 @@ pub(crate) fn debt<'a>(
             evidence: json!({ "size": doc.size, "budget": doc.budget, "held": held }),
         });
     }
-    [("rehome", rehome), ("over-budget", over_budget)]
+    [rehome, over_budget]
 }
 
 #[cfg(test)]
@@ -84,7 +86,7 @@ mod tests {
             bytes: 9,
             fault: &fault,
         }];
-        assert_eq!(debt(&[], &strays, &Baseline::new())[0].1, vec![]);
+        assert_eq!(debt(&[], &strays, &Baseline::new())[0], vec![]);
         let mut baseline = Baseline::new();
         baseline.insert(
             "NEW.md".into(),
@@ -93,7 +95,7 @@ mod tests {
                 local_refs: None,
             }),
         );
-        assert_eq!(debt(&[], &strays, &baseline)[0].1[0].file, "NEW.md");
+        assert_eq!(debt(&[], &strays, &baseline)[0][0].file, "NEW.md");
     }
 
     #[test]
@@ -123,7 +125,7 @@ mod tests {
                 ..Hold::default()
             }),
         );
-        assert_eq!(debt(&docs, &[], &baseline)[1].1, vec![]);
+        assert_eq!(debt(&docs, &[], &baseline)[1], vec![]);
         baseline.insert(
             "R.md".into(),
             Held::Over(Hold {
@@ -131,8 +133,7 @@ mod tests {
                 ..Hold::default()
             }),
         );
-        let [_, (kind, over)] = debt(&docs, &[], &baseline);
-        assert_eq!(kind, "over-budget");
+        let [_, over] = debt(&docs, &[], &baseline);
         assert_eq!(
             over[0].summary,
             "`R.md` is its longest paragraph 9 characters, over 5, its budget: cut it to what its kind holds"

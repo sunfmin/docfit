@@ -7,6 +7,8 @@
 
 use crate::budget::{self, Baseline, Slot};
 use crate::paragraph::{self, Paragraph};
+use crate::tasks::Debt;
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 
@@ -22,16 +24,17 @@ pub(crate) struct Text {
 /// One restatement: the line (from 1) it starts on, the last line it is on,
 /// what it is (the string, or the run's first line), and where the repo
 /// already says it (the catalog, or `<file>:<line>`).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize)]
 pub(crate) struct Restated {
     pub(crate) line: usize,
     pub(crate) end: usize,
+    #[serde(rename = "found")]
     pub(crate) what: String,
     pub(crate) from: String,
 }
 
 /// What a document restates, each in line order.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Serialize)]
 pub(crate) struct Restates {
     pub(crate) strings: Vec<Restated>,
     pub(crate) copies: Vec<Restated>,
@@ -252,6 +255,29 @@ pub(crate) fn check(found: &BTreeMap<&str, Restates>, baseline: Option<&Baseline
         }
     }
     faults
+}
+
+/// The `restates` debt: each document of `found` with a measure whose count
+/// `baseline` holds that it still restates, with every restatement.
+pub(crate) fn debt<'a>(found: &BTreeMap<&'a str, Restates>, baseline: &Baseline) -> Vec<Debt<'a>> {
+    let mut out = Vec::new();
+    for (file, restates) in found {
+        let held = Measure::ALL.map(|m| budget::held(baseline, file, m.slot()));
+        if held == [0, 0] || *restates == Restates::default() {
+            continue;
+        }
+        let [strings, copies] = [&restates.strings, &restates.copies].map(Vec::len);
+        let mut evidence = json!(restates);
+        evidence["held"] = json!({ "strings": held[0], "copies": held[1] });
+        out.push(Debt {
+            file,
+            summary: format!(
+                "`{file}` restates what the repo already says ({strings} strings, {copies} copies): point at the one place, and delete the copy"
+            ),
+            evidence,
+        });
+    }
+    out
 }
 
 /// `next` (the baseline the budgets ratchet to) holding each document's

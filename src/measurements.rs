@@ -6,6 +6,7 @@
 use crate::budget::{self, Baseline, Slot};
 use crate::kind::Kind;
 use crate::paragraph::{self, Paragraph};
+use crate::tasks::Debt;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -47,6 +48,31 @@ pub(crate) fn check(found: &Found, baseline: Option<&Baseline>) -> Vec<Value> {
         }));
     }
     faults
+}
+
+/// The `measurement` debt: each document of `found` whose count `baseline`
+/// holds that still holds a measurement, with each and its line.
+pub(crate) fn debt<'a>(found: &Found<'a>, baseline: &Baseline) -> Vec<Debt<'a>> {
+    let mut out = Vec::new();
+    for (file, all) in found {
+        let held = budget::held(baseline, file, SLOT);
+        if held == 0 || all.is_empty() {
+            continue;
+        }
+        let each: Vec<Value> = all
+            .iter()
+            .map(|(line, what)| json!({ "line": line, "found": what }))
+            .collect();
+        out.push(Debt {
+            file,
+            summary: format!(
+                "`{file}` holds {} measured numbers, held at {held}: move each to the ADR of the decision it supports, with its command, or delete it",
+                all.len()
+            ),
+            evidence: json!({ "measurements": each, "held": held }),
+        });
+    }
+    out
 }
 
 /// `next` holding each document's count, shrink-only

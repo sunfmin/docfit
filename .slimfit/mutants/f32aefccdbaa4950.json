@@ -1,0 +1,27 @@
+{
+  "tree": "e890a9a72cf27c195862a780e5580cbb999c68a0+d1fba762150c532c",
+  "picker": "codex:01a21384-a4ed-79d0-aeea-9b773ba62edb:default",
+  "author": "claude-code:14b3ec34-e594-590e-86df-bf9e75c87446:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/refs.rs:137:70: replace > with >= in debt",
+        "why": "The fixture checks a ref held at one and leaves open whether a live ref with zero held count would wrongly become a task.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/measurements.rs:59:22: replace || with && in debt",
+        "why": "The paid-and-ratcheted case can clear both sides of the guard, leaving either condition alone untested.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/restates.rs:266:27: replace || with && in debt",
+        "why": "A held copy and a fully paid file leave open whether the guard works when only one of the held counts or current findings has cleared.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}
