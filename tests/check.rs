@@ -476,7 +476,7 @@ fn at_its_budget_exactly_is_within_it() {
 const POINTED: &str = "[documents]\n\"README.md\" = \"readme\"\n\"docs/**/*.md\" = \"agent\"\n";
 
 /// The `broken_pointer` faults of `readme` (and `docs/agents/a.md`, `guide`),
-/// each as (file, line, missing).
+/// each as (file, line, "<pointer> -> <missing>").
 fn broken(readme: &str, guide: &str) -> Vec<(String, u64, String)> {
     let dir = repo(&[
         ("docfit.toml", POINTED),
@@ -497,7 +497,11 @@ fn broken(readme: &str, guide: &str) -> Vec<(String, u64, String)> {
             (
                 f["file"].as_str().unwrap().to_string(),
                 f["line"].as_u64().unwrap(),
-                f["missing"].as_str().unwrap().to_string(),
+                format!(
+                    "{} -> {}",
+                    f["pointer"].as_str().unwrap(),
+                    f["missing"].as_str().unwrap()
+                ),
             )
         })
         .collect();
@@ -512,7 +516,7 @@ fn at(file: &str, line: u64, missing: &str) -> (String, u64, String) {
 #[test]
 fn a_backticked_path_that_exists_is_green_and_one_that_does_not_red() {
     let readme = "Run `src/main.rs:1`, see `docs/agents/`, `docfit.toml` and `docs/adr`.\n\
-        Not paths: `docfit --help`, `*.md`, `<dir>/x`, `~/a/b`, `/usr/bin`, `.md`, `Kind::ALL`, `a.b`.\n\
+        Not paths: `docfit --help`, `*.md`, `<dir>/x`, `~/a/b`, `/usr/bin`, `.md`, `Kind::ALL`, `a.b`, `src/main.rs:x`.\n\
         Gone: `src/gone.rs` and `notes.toml`.\n";
     assert_eq!(
         broken(
@@ -520,9 +524,9 @@ fn a_backticked_path_that_exists_is_green_and_one_that_does_not_red() {
             "Here `a.md`, from the top `README.md`; not `b.md`.\n"
         ),
         [
-            at("README.md", 3, "src/gone.rs"),
-            at("README.md", 3, "notes.toml"),
-            at("docs/agents/a.md", 1, "b.md"),
+            at("README.md", 3, "src/gone.rs -> src/gone.rs"),
+            at("README.md", 3, "notes.toml -> notes.toml"),
+            at("docs/agents/a.md", 1, "b.md -> b.md"),
         ]
     );
 }
@@ -538,21 +542,22 @@ fn a_link_to_a_missing_file_is_red_and_a_url_is_not_checked() {
     assert_eq!(
         broken(readme, guide),
         [
-            at("README.md", 6, "docs/gone.md"),
-            at("docs/agents/a.md", 1, "../../../x.md"),
-            at("docs/agents/a.md", 1, "docs/agents/c.md"),
+            at("README.md", 6, "docs/gone.md -> docs/gone.md"),
+            at("docs/agents/a.md", 1, "../../../x.md -> ../../../x.md"),
+            at("docs/agents/a.md", 1, "c.md -> docs/agents/c.md"),
         ]
     );
 }
 
 #[test]
 fn an_adr_named_by_a_number_with_no_file_of_it_is_red() {
-    let readme = "Per ADR 0001 and ADR-1, ADRs, `ADR 0002`, BADR 0003, ADR 0004x.\nBut ADR 0009.\n";
+    let readme =
+        "Per ADR 0001 and ADR-1, ADRs, `ADR 0002`, BADR 0003, ADR 0004x, ADR-.\nBut ADR 0009.\n";
     assert_eq!(
         broken(readme, "Or ADR-0010.\n"),
         [
-            at("README.md", 2, "docs/adr/0009-*"),
-            at("docs/agents/a.md", 1, "docs/adr/0010-*"),
+            at("README.md", 2, "ADR 0009 -> docs/adr/0009-*"),
+            at("docs/agents/a.md", 1, "ADR-0010 -> docs/adr/0010-*"),
         ]
     );
 }
