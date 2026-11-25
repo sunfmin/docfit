@@ -2,9 +2,10 @@
 //! pages, and what docfit exits with.
 
 use crate::budget::{self, BASELINE, Baseline, Measured, Size};
-use crate::documents::{self, Answer, CONFIG, Refusal, TABLE};
+use crate::documents::{self, Answer, CONFIG, Document, Refusal, TABLE};
 use crate::kind::Kind;
 use crate::repo;
+use crate::sentences;
 use agent_help::Help;
 use clap::{FromArgMatches, Parser, Subcommand};
 use serde_json::{Value, json};
@@ -49,7 +50,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Checks that every Markdown file git tracks is registered in `docfit.toml` under one kind, within its budget.
+    /// Checks that every Markdown file git tracks is registered in `docfit.toml` under one kind, within its budget, one sentence per line.
     ///
     /// ## When to run it
     ///
@@ -78,7 +79,8 @@ enum Cmd {
     ///   - `unregistered`: no glob matches the file. `kinds` are the kinds it could be: the one its place says, such as `agent` for `CLAUDE.md` or a file in `docs/agents/`, otherwise every kind; `fix` is the line to add.
     ///   - `two_kinds`: globs of several kinds match it; `kinds` are those kinds.
     ///   - `over_budget`: its size in bytes, `size`, is over `limit`, its budget or, when the baseline holds it at more, that.
-    ///   - `line_too_long`: its line `line` is `size` characters, over `limit`, as above. The fix is to break it at its sentences, one per line; `docfit fmt` (docfit#8) will do it once it exists.
+    ///   - `line_too_long`: its line `line` is `size` characters, over `limit`, as above. The fix is to break it at its sentences, one per line, which `docfit fmt` does; a sentence still too long is cut by hand.
+    ///   - `unformatted`: `docfit fmt` would change it, first at its line `line`: some line holds more than one sentence. The fix is `docfit fmt <file>`.
     /// - `next`: the first fault's fix; with none, `docfit ratchet` when a document shrank below what the baseline holds, or that there is nothing to do.
     ///
     /// For example, with `CLAUDE.md` registered and `notes.md` not:
@@ -145,6 +147,46 @@ enum Cmd {
         #[arg(long, verbatim_doc_comment)]
         repo: Option<PathBuf>,
     },
+    /// Breaks the prose of every registered document at its sentences, one sentence per line.
+    ///
+    /// One sentence per line (semantic line breaks) means two changes that edit different sentences of one paragraph edit different lines, so they never conflict when merged.
+    ///
+    /// ## When to run it
+    ///
+    /// When `docfit check` names an `unformatted` or a `line_too_long` fault, or after writing prose. It is safe to run any time: a second run changes nothing.
+    ///
+    /// ## What it reads and writes
+    ///
+    /// It reads what `docfit check` reads, without the baseline. With no files named it formats every registered document; with files named, only those, each named from the repo's top as `docfit check` lists it. It rewrites each document it changes, whole, through a file beside it renamed over it, and leaves the others untouched.
+    ///
+    /// A sentence ends at `.`, `?` or `!` followed by a space, or at `。`, `？` or `！`; a closing `)`, `]`, quote, `*` or `_` right after the end stays with its sentence. Where more of the line follows a sentence's end, the line is broken there and the spaces between the two sentences dropped; the new line repeats the line's indent and quote markers, and a list item's later lines are indented to its text. It leaves as they are: front matter, fenced code blocks, tables, headings, HTML lines, link definitions, inline code, and a break before text that would start a block of its own (a list marker, `#`, `>`, `|`). It only breaks lines, never joins them.
+    ///
+    /// ## What it answers
+    ///
+    /// - `changed`: whether it changed any document. `false` is nothing to format, and it writes nothing.
+    /// - `formatted`: the documents it changed, in path order; empty when every one was formatted already.
+    /// - `next`: review the diff and commit it, or that there is nothing to format.
+    ///
+    /// It exits {const:EXIT_OK}.
+    ///
+    /// ## What it may refuse
+    ///
+    /// What `docfit check` refuses, except a baseline; a file named that is not a registered document (the fix: name it as `docfit check` lists it, or register it); and a document it cannot write. It exits {const:EXIT_ERROR}; a refusal before it writes writes nothing.
+    ///
+    /// ## What trips you up
+    ///
+    /// - An abbreviation such as `e.g.` followed by a space ends a sentence to it: write `for example`.
+    /// - An indented code block is prose to it: fence code with ``` instead.
+    /// - Killed while writing, each document is whole, either as it was or formatted: run it again.
+    #[command(next_help_heading = "Run by the agent", verbatim_doc_comment)]
+    Fmt {
+        /// The documents to format, from the repo's top (default: every registered document).
+        #[arg(verbatim_doc_comment)]
+        files: Vec<String>,
+        /// The repository to format (default: the one containing the current directory).
+        #[arg(long, verbatim_doc_comment)]
+        repo: Option<PathBuf>,
+    },
     /// Shows one topic of this manual, or all of it.
     ///
     /// `docfit help all` shows the whole manual.
@@ -183,6 +225,7 @@ pub(crate) fn run(args: impl IntoIterator<Item = std::ffi::OsString>) -> (String
     match cli.command {
         Cmd::Check { repo } => check(repo).unwrap_or_else(refused),
         Cmd::Ratchet { repo } => ratchet(repo).unwrap_or_else(refused),
+        Cmd::Fmt { repo, files } => fmt(repo, files).unwrap_or_else(refused),
         Cmd::Help { topic: None } => (help.index().expect("checked"), EXIT_OK),
         Cmd::Help { topic: Some(topic) } => match help.topic_help(&topic) {
             Ok(markdown) => (markdown, EXIT_OK),
@@ -208,21 +251,16 @@ fn registered(repo: Option<PathBuf>) -> Result<(PathBuf, Answer), Vec<Refusal>> 
     Ok((top, answer))
 }
 
-/// Each registered document's text, read from the working tree.
-/// Each registered document, measured as it is read from the working tree.
-fn measured<'a>(top: &Path, answer: &'a Answer) -> Result<Vec<Measured<'a>>, Vec<Refusal>> {
-    let (mut docs, mut refusals) = (Vec::new(), Vec::new());
-    for (file, doc) in &answer.documents {
+/// Each of `docs`, a registered document, with its text read from the
+/// working tree.
+fn read<'a>(
+    top: &Path,
+    docs: impl Iterator<Item = (&'a String, &'a Document)>,
+) -> Result<Vec<(&'a str, Document, String)>, Vec<Refusal>> {
+    let (mut texts, mut refusals) = (Vec::new(), Vec::new());
+    for (file, doc) in docs {
         match std::fs::read_to_string(top.join(file)) {
-            Ok(text) => {
-                let (size, at) = Size::of(&text);
-                docs.push(Measured {
-                    file,
-                    budget: doc.budget,
-                    size,
-                    at,
-                });
-            }
+            Ok(text) => texts.push((file.as_str(), *doc, text)),
             Err(e) => refusals.push(refusal(
                 &format!("cannot read `{file}`, which git tracks: {e}"),
                 &format!("restore `{file}` as UTF-8 text, or `git rm` it"),
@@ -230,10 +268,26 @@ fn measured<'a>(top: &Path, answer: &'a Answer) -> Result<Vec<Measured<'a>>, Vec
         }
     }
     if refusals.is_empty() {
-        Ok(docs)
+        Ok(texts)
     } else {
         Err(refusals)
     }
+}
+
+/// Each document read, measured.
+fn measured<'a>(texts: &'a [(&'a str, Document, String)]) -> Vec<Measured<'a>> {
+    texts
+        .iter()
+        .map(|(file, doc, text)| {
+            let (size, at) = Size::of(text);
+            Measured {
+                file,
+                budget: doc.budget,
+                size,
+                at,
+            }
+        })
+        .collect()
 }
 
 /// The baseline at the repo's top: `None` when it has none yet.
@@ -255,10 +309,19 @@ fn baseline(top: &Path) -> Result<Option<Baseline>, Vec<Refusal>> {
 
 fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let (top, answer) = registered(repo)?;
-    let docs = measured(&top, &answer)?;
+    let texts = read(&top, answer.documents.iter())?;
+    let docs = measured(&texts);
     let held = baseline(&top)?;
     let mut faults = answer.faults.clone();
     faults.extend(budget::check(&docs, held.as_ref()));
+    for (file, _, text) in &texts {
+        if let Some(line) = sentences::first_unformatted(text) {
+            faults.push(json!({
+                "file": file, "fault": "unformatted", "line": line,
+                "fix": format!("run `docfit fmt {file}`: it breaks its prose at its sentences, one per line"),
+            }));
+        }
+    }
     faults.sort_by(|a, b| a["file"].as_str().cmp(&b["file"].as_str()));
     let tighter = held
         .as_ref()
@@ -274,7 +337,7 @@ fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
         None => (
             EXIT_OK,
             json!(
-                "nothing to do: every Markdown file is registered under one kind, within its budget"
+                "nothing to do: every Markdown file is registered under one kind, within its budget, one sentence per line"
             ),
         ),
     };
@@ -291,7 +354,8 @@ fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
 
 fn ratchet(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let (top, answer) = registered(repo)?;
-    let docs = measured(&top, &answer)?;
+    let texts = read(&top, answer.documents.iter())?;
+    let docs = measured(&texts);
     let held = baseline(&top)?;
     let next = budget::ratchet(&docs, held.as_ref());
     let changed = held.as_ref() != Some(&next);
@@ -309,6 +373,46 @@ fn ratchet(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     ))
 }
 
+fn fmt(repo: Option<PathBuf>, files: Vec<String>) -> Result<(String, i32), Vec<Refusal>> {
+    let (top, answer) = registered(repo)?;
+    let unregistered: Vec<Refusal> = files
+        .iter()
+        .filter(|f| !answer.documents.contains_key(*f))
+        .map(|f| {
+            refusal(
+                &format!("`{f}` is not a registered document"),
+                &format!(
+                    "name it from the repo's top as `docfit check` lists it under `documents`, or register it in {CONFIG}"
+                ),
+            )
+        })
+        .collect();
+    if !unregistered.is_empty() {
+        return Err(unregistered);
+    }
+    let docs = answer
+        .documents
+        .iter()
+        .filter(|(f, _)| files.is_empty() || files.contains(f));
+    let mut formatted = Vec::new();
+    for (file, _, text) in read(&top, docs)? {
+        let new = sentences::format(&text);
+        if new != text {
+            write(&top.join(file), &new)?;
+            formatted.push(file);
+        }
+    }
+    let next = if formatted.is_empty() {
+        "nothing to format: run `docfit check`"
+    } else {
+        "review the diff and commit it, then `docfit check`"
+    };
+    Ok((
+        pretty(&json!({ "changed": !formatted.is_empty(), "formatted": formatted, "next": next })),
+        EXIT_OK,
+    ))
+}
+
 /// `text` written to `path` whole or not at all: a temp file beside it, renamed over it.
 fn write(path: &Path, text: &str) -> Result<(), Vec<Refusal>> {
     let failed = |e: std::io::Error| {
@@ -317,9 +421,13 @@ fn write(path: &Path, text: &str) -> Result<(), Vec<Refusal>> {
             &format!("make {} writable, then run it again", path.display()),
         )]
     };
-    let dir = path.parent().expect("the baseline is in a directory");
+    let dir = path.parent().expect("a file is in a directory");
     std::fs::create_dir_all(dir).map_err(failed)?;
-    let temp = path.with_extension("json.tmp");
+    let name = path
+        .file_name()
+        .expect("a file has a name")
+        .to_string_lossy();
+    let temp = path.with_file_name(format!("{name}.tmp"));
     std::fs::write(&temp, text).map_err(failed)?;
     std::fs::rename(&temp, path).map_err(failed)
 }

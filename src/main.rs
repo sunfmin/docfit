@@ -6,6 +6,7 @@ mod cli;
 mod documents;
 mod kind;
 mod repo;
+mod sentences;
 
 agent_help::binary!("docfit");
 

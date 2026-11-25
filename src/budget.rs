@@ -102,8 +102,8 @@ pub(crate) fn check(docs: &[Measured], baseline: Option<&Baseline>) -> Vec<Value
             faults.push(json!({
                 "file": doc.file, "fault": "line_too_long", "line": at, "size": size.line, "limit": limit.line,
                 "fix": format!(
-                    "break line {at} of `{}` at its sentences, one per line, each at most {} characters (it is {}{}); `docfit fmt` (docfit#8) will do it once it exists{adopt}",
-                    doc.file, limit.line, size.line, grew(doc.budget.line, limit.line)
+                    "break line {at} of `{}` at its sentences, one per line, each at most {} characters (it is {}{}): `docfit fmt {}` breaks it at its sentences, and a sentence still too long is cut by hand{adopt}",
+                    doc.file, limit.line, size.line, grew(doc.budget.line, limit.line), doc.file
                 ),
             }));
         }

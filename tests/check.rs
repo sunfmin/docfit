@@ -1,4 +1,4 @@
-//! `docfit check` on throwaway git repos: its JSON and exit code.
+//! `docfit check`, `ratchet` and `fmt` on throwaway git repos: their JSON and exit code.
 
 use serde_json::Value;
 use std::path::Path;
@@ -41,8 +41,12 @@ fn check(dir: &Path) -> (i32, Value) {
 }
 
 fn docfit(dir: &Path, command: &str) -> (i32, Value) {
+    run(dir, &[command])
+}
+
+fn run(dir: &Path, args: &[&str]) -> (i32, Value) {
     let out = isolated(Command::new(env!("CARGO_BIN_EXE_docfit")), dir)
-        .arg(command)
+        .args(args)
         .output()
         .unwrap();
     let stdout = String::from_utf8(out.stdout).unwrap();
@@ -267,7 +271,7 @@ fn over_its_budget_with_no_baseline_is_red() {
         fix.starts_with("break line 2 of `README.md` at its sentences"),
         "{fix}"
     );
-    assert!(fix.contains("`docfit fmt` (docfit#8)"), "{fix}");
+    assert!(fix.contains("`docfit fmt README.md` breaks it"), "{fix}");
     assert!(
         fix.contains("`docfit ratchet` writes .docfit/baseline.json"),
         "{fix}"
@@ -470,5 +474,103 @@ fn at_its_budget_exactly_is_within_it() {
     assert_eq!(
         baseline(dir.path()),
         serde_json::json!({ "README.md": { "line": 7 } })
+    );
+}
+
+const PROSE: &str = "# Title. Still the title.\n\nOne. Two? Three!\n- 第一句。第二句。\n\n```sh\necho a. b.\n```\n\n| a. b. | c. d. |\n|---|---|\n";
+
+#[test]
+fn an_unformatted_document_is_red_until_fmt_breaks_it_at_its_sentences() {
+    let dir = repo(&[("docfit.toml", README_ONLY), ("README.md", PROSE)]);
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 1, "{answer}");
+    assert_eq!(
+        answer["faults"],
+        serde_json::json!([{
+            "file": "README.md", "fault": "unformatted", "line": 3,
+            "fix": "run `docfit fmt README.md`: it breaks its prose at its sentences, one per line",
+        }])
+    );
+    let (code, answer) = run(dir.path(), &["fmt", "README.md"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["changed"], true);
+    assert_eq!(answer["formatted"], serde_json::json!(["README.md"]));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("README.md")).unwrap(),
+        "# Title. Still the title.\n\nOne.\nTwo?\nThree!\n- 第一句。\n  第二句。\n\n```sh\necho a. b.\n```\n\n| a. b. | c. d. |\n|---|---|\n"
+    );
+    assert!(!dir.path().join("README.md.tmp").exists());
+    let (code, answer) = check(dir.path());
+    assert_eq!(
+        (code, &answer["faults"]),
+        (0, &serde_json::json!([])),
+        "{answer}"
+    );
+}
+
+#[test]
+fn a_second_fmt_changes_nothing() {
+    let dir = repo(&[("docfit.toml", README_ONLY), ("README.md", PROSE)]);
+    run(dir.path(), &["fmt"]);
+    let once = std::fs::read_to_string(dir.path().join("README.md")).unwrap();
+    let (code, answer) = run(dir.path(), &["fmt"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["changed"], false);
+    assert_eq!(answer["formatted"], serde_json::json!([]));
+    assert_eq!(answer["next"], "nothing to format: run `docfit check`");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("README.md")).unwrap(),
+        once
+    );
+}
+
+#[test]
+fn fmt_leaves_a_file_that_is_no_registered_document_alone() {
+    let dir = repo(&[
+        ("docfit.toml", README_ONLY),
+        ("README.md", "A. B.\n"),
+        ("notes.md", "C. D.\n"),
+    ]);
+    let (code, answer) = run(dir.path(), &["fmt"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["formatted"], serde_json::json!(["README.md"]));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("notes.md")).unwrap(),
+        "C. D.\n"
+    );
+}
+
+#[test]
+fn fmt_naming_a_file_that_is_no_registered_document_is_refused_and_writes_nothing() {
+    let dir = repo(&[
+        ("docfit.toml", README_ONLY),
+        ("README.md", "A. B.\n"),
+        ("notes.md", "C. D.\n"),
+    ]);
+    let (code, answer) = run(dir.path(), &["fmt", "README.md", "notes.md"]);
+    assert_eq!(code, 2, "{answer}");
+    assert_eq!(
+        answer["error"],
+        serde_json::json!([{
+            "fault": "`notes.md` is not a registered document",
+            "fix": "name it from the repo's top as `docfit check` lists it under `documents`, or register it in docfit.toml",
+        }])
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("README.md")).unwrap(),
+        "A. B.\n"
+    );
+}
+
+#[test]
+fn fmt_on_a_document_it_cannot_write_is_refused() {
+    let dir = repo(&[("docfit.toml", README_ONLY), ("README.md", "A. B.\n")]);
+    std::fs::create_dir(dir.path().join("README.md.tmp")).unwrap();
+    let (code, answer) = run(dir.path(), &["fmt"]);
+    assert_eq!(code, 2, "{answer}");
+    let fix = answer["error"][0]["fix"].as_str().unwrap();
+    assert!(
+        fix.ends_with("README.md writable, then run it again"),
+        "{fix}"
     );
 }
