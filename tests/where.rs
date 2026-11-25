@@ -14,7 +14,7 @@ const SPEC: &str = "# Spec
 
 The answer is built by `Answer` and read back by `parse_config`, while `Missing` and `docfit check --help` are not code, `Answer` said twice is one, `answer::Answer` is code but `answer::Answ` is no whole word, and the words here run on long enough.
 
-Tap 「保存」 and then \"Cancel\" to leave the page; \"Nowhere\" is a string no catalog holds, so it does not count, nor does a stray “ quote.
+Tap 「保存」 and then \"Cancel\" to leave the page; \"Nowhere\" is a string no catalog holds, so it does not count, nor does a stray “ quote, nor an empty \"\".
 
 Startup took 1.5 s and 63 MiB (#12, rollmind#146), down from 70 分钟, at 100% of 112×112 tiles; #notes and #12a are no issue.
 

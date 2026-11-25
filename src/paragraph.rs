@@ -259,30 +259,16 @@ pub(crate) fn is_path(token: &str, tracked: &[String]) -> bool {
 /// applies: a pointer is kept, a decision goes to an ADR, code or strings
 /// are deleted, evidence goes to an issue, and the rest is for the agent.
 pub(crate) fn place(p: &Paragraph, known: &Known) -> Placed {
-    let text = excerpt(&p.text);
-    if p.fenced {
-        let none = || Found::of(std::iter::empty(), |_| false);
-        return Placed {
-            line: p.line,
-            text,
-            code: none(),
-            strings: none(),
-            evidence: Vec::new(),
-            decision: Vec::new(),
-            pointer: false,
-            home: Home::Judge,
-            adr: None,
-        };
-    }
-    let prose = prose(&p.text);
-    let code = Found::of(tokens(&p.text), |t| {
+    let read = if p.fenced { "" } else { &p.text };
+    let prose = prose(read);
+    let code = Found::of(tokens(read), |t| {
         known.paths.contains(t) || known.words.contains(t)
     });
     let strings = Found::of(quoted(&prose).into_iter(), |s| known.strings.contains(s));
     let mut evidence = issues(&prose);
     evidence.extend(measures(&prose));
     let decision = decision(&prose);
-    let pointer = pointer(&p.text, &known.paths);
+    let pointer = pointer(read, &known.paths);
     let home = if pointer {
         Home::Keep
     } else if !decision.is_empty() {
@@ -294,10 +280,10 @@ pub(crate) fn place(p: &Paragraph, known: &Known) -> Placed {
     } else {
         Home::Judge
     };
-    let adr = (home == Home::Adr).then(|| named(&p.text, &known.adrs).map(|a| a.path.clone()));
+    let adr = (home == Home::Adr).then(|| named(read, &known.adrs).map(|a| a.path.clone()));
     Placed {
         line: p.line,
-        text,
+        text: excerpt(&p.text),
         code,
         strings,
         evidence,
