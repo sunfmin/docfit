@@ -64,15 +64,26 @@ pub(crate) fn debt<'a>(
         let over =
             |size: usize, budget: usize, held: Option<usize>| held.is_some() && size > budget;
         let Size { bytes, line } = doc.size;
-        if !over(bytes, doc.budget.bytes, held.bytes) && !over(line, doc.budget.line, held.line) {
+        let mut measures = Vec::new();
+        if over(bytes, doc.budget.bytes, held.bytes) {
+            measures.push(format!("{bytes} bytes, over {}", doc.budget.bytes));
+        }
+        if over(line, doc.budget.line, held.line) {
+            measures.push(format!(
+                "its longest line {line} characters, over {}",
+                doc.budget.line
+            ));
+        }
+        if measures.is_empty() {
             continue;
         }
         out.push(Debt {
             kind: TaskKind::OverBudget,
             file: doc.file,
             summary: format!(
-                "`{}` is {bytes} bytes, longest line {line}, over its budget of {} bytes, {} characters a line: cut it to what its kind holds",
-                doc.file, doc.budget.bytes, doc.budget.line
+                "`{}` is {}, its budget: cut it to what its kind holds",
+                doc.file,
+                measures.join(", and ")
             ),
             evidence: json!({ "size": doc.size, "budget": doc.budget, "held": held }),
         });
@@ -110,6 +121,11 @@ mod tests {
                 line: Some(9),
             }),
         );
-        assert_eq!(debt(&docs, &[], &baseline)[0].kind, TaskKind::OverBudget);
+        let line_only = &debt(&docs, &[], &baseline)[0];
+        assert_eq!(line_only.kind, TaskKind::OverBudget);
+        assert_eq!(
+            line_only.summary,
+            "`R.md` is its longest line 9 characters, over 5, its budget: cut it to what its kind holds"
+        );
     }
 }
