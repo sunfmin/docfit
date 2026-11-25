@@ -422,10 +422,14 @@ fn a_baseline_or_document_it_cannot_read_is_refused() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_baseline_it_cannot_read_or_write_is_refused() {
     let dir = repo(&[("docfit.toml", README_ONLY), ("README.md", "r\n")]);
-    std::fs::write(dir.path().join(".docfit"), "").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let held = dir.path().join(".docfit");
+    std::fs::create_dir(&held).unwrap();
+    std::fs::set_permissions(&held, std::fs::Permissions::from_mode(0o555)).unwrap();
     let (code, answer) = docfit(dir.path(), "ratchet");
     assert_eq!(code, 2, "{answer}");
     assert!(
@@ -435,8 +439,8 @@ fn a_baseline_it_cannot_read_or_write_is_refused() {
             .ends_with("writable, then run it again"),
         "{answer}"
     );
-    std::fs::remove_file(dir.path().join(".docfit")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".docfit/baseline.json")).unwrap();
+    std::fs::set_permissions(&held, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::create_dir(held.join("baseline.json")).unwrap();
     let (code, answer) = check(dir.path());
     assert_eq!(code, 2, "{answer}");
     assert_eq!(

@@ -60,20 +60,16 @@ pub(crate) struct Measured<'a> {
     pub(crate) text: &'a str,
 }
 
-/// The baseline file's text read: `None` when the repo has none yet.
-pub(crate) fn baseline(text: Option<&str>) -> Result<Option<Baseline>, Vec<Refusal>> {
-    text.map(|t| {
-        serde_json::from_str::<Baseline>(t).map_err(|e| {
-            vec![Refusal {
-                fault: format!("{BASELINE} is not a baseline: {e}"),
-                fix: format!("restore {BASELINE} from git, or delete it and run `docfit ratchet`"),
-            }]
-        })
+/// The baseline file's text read.
+pub(crate) fn baseline(text: &str) -> Result<Baseline, Vec<Refusal>> {
+    serde_json::from_str(text).map_err(|e| {
+        vec![Refusal {
+            fault: format!("{BASELINE} is not a baseline: {e}"),
+            fix: format!("restore {BASELINE} from git, or delete it and run `docfit ratchet`"),
+        }]
     })
-    .transpose()
 }
 
-/// Each fault of `docs` against their budgets, raised to what `baseline` holds.
 /// `adopting` (the repo has no baseline yet) adds to each fix the ratchet
 /// that holds every document at its size now.
 pub(crate) fn check(docs: &[Measured], baseline: &Baseline, adopting: bool) -> Vec<Value> {

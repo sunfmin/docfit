@@ -243,8 +243,8 @@ fn measured<'a>(answer: &'a Answer, texts: &'a [String]) -> Vec<Measured<'a>> {
 /// The baseline at the repo's top: `None` when it has none yet.
 fn baseline(top: &Path) -> Result<Option<Baseline>, Vec<Refusal>> {
     match std::fs::read_to_string(top.join(BASELINE)) {
-        Ok(text) => budget::baseline(Some(&text)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => budget::baseline(None),
+        Ok(text) => budget::baseline(&text).map(Some),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(vec![refusal(
             &format!("cannot read {BASELINE}: {e}"),
             &format!("make {BASELINE} readable, or restore it from git"),
