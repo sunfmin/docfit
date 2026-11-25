@@ -1,9 +1,10 @@
-//! Decides budgets: a document's size and longest line, against its budget
+//! Decides budgets: a document's size and longest paragraph, against its budget
 //! and the baseline (`.docfit/baseline.json`), which only tightens; a
 //! document's broken pointers, against those the baseline holds from
 //! adoption; and a file no kind fits, held to rehome at its size. Pure: the
 //! files' sizes, broken pointers and the baseline arrive as arguments.
 
+use crate::paragraph;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -11,28 +12,24 @@ use std::collections::{BTreeMap, BTreeSet};
 /// The baseline, from the repo's top.
 pub(crate) const BASELINE: &str = ".docfit/baseline.json";
 
-/// What a document is measured by: its size in bytes, and its longest line in
-/// characters. A budget and a baseline's hold are each one of these.
+/// What a document is measured by: its size in bytes, and its longest
+/// paragraph in characters. A budget and a baseline's hold are each one of
+/// these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Size {
     pub(crate) bytes: usize,
-    pub(crate) line: usize,
+    pub(crate) paragraph: usize,
 }
 
 impl Size {
-    /// `text` measured; with it, the number (from 1) of its longest line.
+    /// `text` measured; with it, the line (from 1) its longest paragraph
+    /// starts on.
     pub(crate) fn of(text: &str) -> (Size, usize) {
-        let (mut line, mut at) = (0, 0);
-        for (n, l) in text.lines().enumerate() {
-            let chars = l.chars().count();
-            if chars > line {
-                (line, at) = (chars, n + 1);
-            }
-        }
+        let (paragraph, at) = paragraph::longest(text);
         (
             Size {
                 bytes: text.len(),
-                line,
+                paragraph,
             },
             at,
         )
@@ -48,6 +45,10 @@ pub(crate) struct Hold {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) bytes: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) paragraph: Option<usize>,
+    /// The longest line a baseline written before paragraphs held: read,
+    /// never written, so a hold with it differs from what `ratchet` writes.
+    #[serde(default, skip_serializing)]
     pub(crate) line: Option<usize>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub(crate) pointers: BTreeSet<String>,
@@ -89,8 +90,8 @@ pub(crate) struct Stray<'a> {
     pub(crate) fault: &'a Value,
 }
 
-/// One document to judge: its path, its budget, its size, the number
-/// (from 1) of its longest line, and the `broken_pointer` faults on it, each
+/// One document to judge: its path, its budget, its size, the line (from 1)
+/// its longest paragraph starts on, and the `broken_pointer` faults on it, each
 /// naming its `pointer`.
 pub(crate) struct Measured<'a> {
     pub(crate) file: &'a str,
@@ -134,7 +135,7 @@ pub(crate) fn check(
         );
         let limit = Size {
             bytes: held.bytes.unwrap_or(0).max(doc.budget.bytes),
-            line: held.line.unwrap_or(0).max(doc.budget.line),
+            paragraph: held.paragraph.unwrap_or(0).max(doc.budget.paragraph),
         };
         let (size, at) = (doc.size, doc.at);
         let grew = |budget: usize, limit: usize| {
@@ -153,12 +154,12 @@ pub(crate) fn check(
                 ),
             }));
         }
-        if size.line > limit.line {
+        if size.paragraph > limit.paragraph {
             faults.push(json!({
-                "file": doc.file, "fault": "line_too_long", "line": at, "size": size.line, "limit": limit.line,
+                "file": doc.file, "fault": "paragraph_too_long", "line": at, "size": size.paragraph, "limit": limit.paragraph,
                 "fix": format!(
-                    "break line {at} of `{}` at its sentences, one per line, each at most {} characters (it is {}{}): `docfit fmt {}` breaks it at its sentences, and a sentence still too long is cut by hand{adopt}",
-                    doc.file, limit.line, size.line, grew(doc.budget.line, limit.line), doc.file
+                    "split the paragraph at line {at} of `{}` into paragraphs of at most {} characters each (it is {}{}), or move part of it to its home, which `docfit where {}` suggests{adopt}",
+                    doc.file, limit.paragraph, size.paragraph, grew(doc.budget.paragraph, limit.paragraph), doc.file
                 ),
             }));
         }
@@ -224,7 +225,12 @@ pub(crate) fn ratchet(
         };
         let hold = Hold {
             bytes: hold(now.bytes, held.as_ref().map(|h| h.bytes), doc.budget.bytes),
-            line: hold(now.line, held.as_ref().map(|h| h.line), doc.budget.line),
+            paragraph: hold(
+                now.paragraph,
+                held.as_ref().map(|h| h.paragraph),
+                doc.budget.paragraph,
+            ),
+            line: None,
             pointers,
         };
         if hold != Hold::default() {

@@ -28,7 +28,7 @@ pub(crate) struct Entry {
     matcher: GlobMatcher,
     kind: Kind,
     bytes: Option<usize>,
-    line: Option<usize>,
+    paragraph: Option<usize>,
 }
 
 /// `docfit.toml`, read: its entries, and the globs of its string catalogs.
@@ -63,11 +63,11 @@ enum Entered {
 struct Budgeted {
     kind: String,
     bytes: Option<usize>,
-    line: Option<usize>,
+    paragraph: Option<usize>,
 }
 
 /// How an entry is written, for a fix.
-const SHAPES: &str = "`\"<kind>\"` or `{ kind = \"<kind>\", bytes = <n>, line = <n> }`";
+const SHAPES: &str = "`\"<kind>\"` or `{ kind = \"<kind>\", bytes = <n>, paragraph = <n> }`";
 
 /// `docfit.toml` read, every fault in it at once.
 pub(crate) fn config(config: &str) -> Result<Config, Vec<Refusal>> {
@@ -88,9 +88,9 @@ pub(crate) fn config(config: &str) -> Result<Config, Vec<Refusal>> {
     let (mut entries, mut refusals) = (Vec::new(), Vec::new());
     let catalogs = catalogs(table.get(CATALOGS), &mut refusals);
     for (glob, value) in documents {
-        let (kind, bytes, line) = match value.clone().try_into() {
+        let (kind, bytes, paragraph) = match value.clone().try_into() {
             Ok(Entered::Kind(name)) => (name, None, None),
-            Ok(Entered::Budget(b)) => (b.kind, b.bytes, b.line),
+            Ok(Entered::Budget(b)) => (b.kind, b.bytes, b.paragraph),
             Err(_) => {
                 refusals.push(Refusal {
                     fault: format!("`{glob}` = `{value}` is not an entry docfit reads"),
@@ -108,7 +108,7 @@ pub(crate) fn config(config: &str) -> Result<Config, Vec<Refusal>> {
                 matcher,
                 kind,
                 bytes,
-                line,
+                paragraph,
             }),
             (Err(name), _) => refusals.push(Refusal {
                 fault: format!("`{glob}` names the kind `{name}`, which docfit does not know"),
@@ -183,7 +183,7 @@ pub(crate) fn check(entries: &[Entry], files: &[String]) -> Answer {
                 };
                 let budget = Size {
                     bytes: set(|e| e.bytes, kind.budget().bytes),
-                    line: set(|e| e.line, kind.budget().line),
+                    paragraph: set(|e| e.paragraph, kind.budget().paragraph),
                 };
                 answer.documents.insert(
                     file.clone(),

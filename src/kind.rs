@@ -45,7 +45,7 @@ impl Kind {
             Kind::Glossary => (
                 "glossary",
                 "everyone",
-                "the project's words, one or two sentences each",
+                "the project's words, a line or two each",
             ),
             Kind::DesignNote => (
                 "design-note",
@@ -56,7 +56,7 @@ impl Kind {
     }
 
     /// The kind's default budget: a document's size in bytes, and its longest
-    /// line in characters. A `docfit.toml` entry may set its own.
+    /// paragraph in characters. A `docfit.toml` entry may set its own.
     pub(crate) fn budget(self) -> Size {
         let kb = match self {
             Kind::Readme => 4,
@@ -67,7 +67,7 @@ impl Kind {
         };
         Size {
             bytes: kb * 1024,
-            line: 200,
+            paragraph: 600,
         }
     }
 
@@ -103,13 +103,13 @@ impl Kind {
     /// The kinds as a Markdown table, for the manual.
     pub(crate) fn table() -> String {
         let mut table = String::from(
-            "| kind | reader | holds only | bytes | longest line |\n|---|---|---|---|---|\n",
+            "| kind | reader | holds only | bytes | longest paragraph |\n|---|---|---|---|---|\n",
         );
         for kind in Kind::ALL {
             let ((name, reader, holds), budget) = (kind.facts(), kind.budget());
             table.push_str(&format!(
                 "| `{name}` | {reader} | {holds} | {} | {} |\n",
-                budget.bytes, budget.line
+                budget.bytes, budget.paragraph
             ));
         }
         table
