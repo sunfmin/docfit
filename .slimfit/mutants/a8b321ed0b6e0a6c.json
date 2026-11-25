@@ -1,0 +1,52 @@
+{
+  "tree": "f2aa326faba01ed8d841d869c5298eae7b8743f6+d1fba762150c532c",
+  "picker": "codex:01a21336-5918-7e31-adce-06788ea55886:default",
+  "author": "claude-code:56b67cd1-1dec-5b84-8f58-727297216772:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/cli.rs:484:17: replace match guard tighter with true in check",
+        "why": "The test for a document at its held limit checks exit status, so it may miss an unnecessary ratchet prompt.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/cli.rs:484:17: replace match guard tighter with false in check",
+        "why": "The legacy baseline test verifies the rewrite through `ratchet`, leaving the prompt on a fault-free check that needs migration potentially uncovered.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/cli.rs:464:19: replace match guard e.kind() == std::io::ErrorKind::NotFound with true in baseline",
+        "why": "A malformed baseline or a failed write can still be refused while a filesystem read error is silently treated as an absent baseline.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  },
+  "removed_tests": {
+    "rust": [
+      "src/sentences.rs:197: english_breaks_after_each_sentence",
+      "src/sentences.rs:205: chinese_breaks_after_each_sentence_with_or_without_a_space",
+      "src/sentences.rs:213: an_end_without_a_space_after_it_is_no_sentence_end",
+      "src/sentences.rs:219: a_closer_stays_with_its_sentence",
+      "src/sentences.rs:227: a_list_item_keeps_its_marker_and_its_later_lines_its_width",
+      "src/sentences.rs:235: code_tables_headings_and_front_matter_come_out_byte_for_byte",
+      "src/sentences.rs:241: inline_code_is_never_broken",
+      "src/sentences.rs:247: a_sentence_is_never_broken_before_what_would_start_a_block",
+      "src/sentences.rs:256: prose_after_closed_inline_code_still_breaks",
+      "src/sentences.rs:264: a_shorter_run_inside_a_fence_does_not_close_it",
+      "src/sentences.rs:270: a_number_without_a_space_after_it_is_no_list_marker",
+      "src/sentences.rs:275: a_sentence_is_never_broken_before_an_underline",
+      "src/sentences.rs:282: a_line_led_by_a_link_is_prose",
+      "src/sentences.rs:287: a_second_run_changes_nothing",
+      "src/sentences.rs:296: the_first_line_it_breaks_is_named",
+      "tests/check.rs:238: the_kinds_default_budget_holds_where_no_entry_sets_one",
+      "tests/check.rs:548: an_unformatted_document_is_red_until_fmt_breaks_it_at_its_sentences",
+      "tests/check.rs:577: a_second_fmt_changes_nothing",
+      "tests/check.rs:593: fmt_leaves_a_file_that_is_no_registered_document_alone",
+      "tests/check.rs:609: fmt_naming_a_file_that_is_no_registered_document_is_refused_and_writes_nothing",
+      "tests/check.rs:631: fmt_on_a_document_it_cannot_write_is_refused"
+    ]
+  }
+}

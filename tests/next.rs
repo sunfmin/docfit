@@ -22,7 +22,6 @@ fn indebted() -> tempfile::TempDir {
         ("src/a.rs", "struct Answer;\n"),
     ]);
     assert_eq!(docfit(dir.path(), &["init"]).0, 0);
-    assert_eq!(docfit(dir.path(), &["fmt"]).0, 0);
     dir
 }
 
@@ -31,10 +30,7 @@ fn a_baseline_with_debt_answers_one_task_of_each_kind() {
     let dir = indebted();
     let (code, answer) = docfit(dir.path(), &["next", "--all"]);
     assert_eq!(code, 0, "{answer}");
-    assert_eq!(
-        answer["by"],
-        format!("docfit {}", env!("CARGO_PKG_VERSION"))
-    );
+    assert_eq!(answer["by"], format!("docfit {}", env!("DOCFIT_VERSION")));
     assert_eq!(answer["counts"], json!({ "rehome": 1, "over-budget": 1 }));
     let tasks = answer["tasks"].as_array().unwrap();
     assert_eq!(tasks.len(), 2, "{answer}");

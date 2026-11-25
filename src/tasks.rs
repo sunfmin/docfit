@@ -44,15 +44,15 @@ pub(crate) fn debt<'a>(
         };
         let over =
             |size: usize, budget: usize, held: Option<usize>| held.is_some() && size > budget;
-        let Size { bytes, line } = doc.size;
+        let Size { bytes, paragraph } = doc.size;
         let mut measures = Vec::new();
         if over(bytes, doc.budget.bytes, held.bytes) {
             measures.push(format!("{bytes} bytes, over {}", doc.budget.bytes));
         }
-        if over(line, doc.budget.line, held.line) {
+        if over(paragraph, doc.budget.paragraph, held.paragraph) {
             measures.push(format!(
-                "its longest line {line} characters, over {}",
-                doc.budget.line
+                "its longest paragraph {paragraph} characters, over {}",
+                doc.budget.paragraph
             ));
         }
         if measures.is_empty() {
@@ -92,34 +92,44 @@ mod tests {
 
     #[test]
     fn a_held_measure_at_or_within_budget_is_no_debt() {
-        let (budget, size) = (Size { bytes: 8, line: 5 }, Size { bytes: 8, line: 9 });
+        let (budget, size) = (
+            Size {
+                bytes: 8,
+                paragraph: 5,
+            },
+            Size {
+                bytes: 8,
+                paragraph: 9,
+            },
+        );
         let docs = [Measured {
             file: "R.md",
             budget,
             size,
             at: 1,
+            broken: Vec::new(),
         }];
         let mut baseline = Baseline::new();
         baseline.insert(
             "R.md".into(),
             Held::Over(Hold {
                 bytes: Some(12),
-                line: None,
+                ..Hold::default()
             }),
         );
         assert_eq!(debt(&docs, &[], &baseline)[1].1, vec![]);
         baseline.insert(
             "R.md".into(),
             Held::Over(Hold {
-                bytes: None,
-                line: Some(9),
+                paragraph: Some(9),
+                ..Hold::default()
             }),
         );
         let [_, (kind, over)] = debt(&docs, &[], &baseline);
         assert_eq!(kind, "over-budget");
         assert_eq!(
             over[0].summary,
-            "`R.md` is its longest line 9 characters, over 5, its budget: cut it to what its kind holds"
+            "`R.md` is its longest paragraph 9 characters, over 5, its budget: cut it to what its kind holds"
         );
     }
 }

@@ -1,0 +1,10 @@
+{
+  "tree": "260d728193f1b50c2edb00be22a8f8c605bd8072+d1fba762150c532c",
+  "lines": 79,
+  "serves": "docfit#4",
+  "considered": "depending on stablehand's version.rs by path (it is a bin crate, no lib to depend on); writing release.sh anew instead of copying stablehand's, the newest sibling's",
+  "reviewer": "codex:01a212ec-11d2-7f72-a50e-8e16c089fa86:default",
+  "author": "claude-code:01550892-5b61-57ea-b9f3-bd5c2885de09:opus",
+  "cut": "packaging/release.sh: use the run ID returned by GitHub’s workflow-dispatch API to delete latest_run, the pre-dispatch lookup and the discovery loop while keeping the completion timeout. build.rs and src/version.rs: pass the existing git helper to stamp and query Git in fallback order, eliminating the Git struct and its assembly while retaining the release override and tagged, tagless and no-Git paths. Repository access was unavailable, so this review is limited to the supplied diff.",
+  "answer": "Kept both. release.sh: gh workflow run --help says the run URL is returned only 'if available', and the cut runs under the daemon's gh, so the lookup loop is the one way proven in slimfit's and stablehand's cuts. version.rs: the Git struct keeps stamp a pure function its tests drive without git; a closure over git would make build.rs the only tester. Both are stablehand's files verbatim, so a shared crate can later replace all three copies at once."
+}

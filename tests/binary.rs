@@ -28,7 +28,7 @@ fn help_is_the_manual() {
     );
     assert!(
         out.contains(
-            "| kind | reader | holds only | bytes | longest line |\n|---|---|---|---|---|\n| `readme` | someone new to the repo |"
+            "| kind | reader | holds only | bytes | longest paragraph |\n|---|---|---|---|---|\n| `readme` | someone new to the repo |"
         ),
         "{out}"
     );
@@ -37,7 +37,7 @@ fn help_is_the_manual() {
         "{out}"
     );
     assert!(
-        out.contains("one mechanism; off unless the repo turns it on | 6144 | 200 |"),
+        out.contains("one mechanism; off unless the repo turns it on | 6144 | 600 |"),
         "{out}"
     );
     assert!(out.contains("## Budgets"), "{out}");
@@ -57,7 +57,7 @@ fn an_unknown_command_is_refused_with_its_fix() {
 fn version_names_the_crate_version() {
     assert_eq!(
         docfit(&["--version"]),
-        (0, format!("docfit {}\n", env!("CARGO_PKG_VERSION")))
+        (0, format!("docfit {}\n", env!("DOCFIT_VERSION")))
     );
 }
 
@@ -80,4 +80,19 @@ fn help_answers_the_index_and_help_all_the_whole_manual() {
     assert_eq!(code, 0);
     assert!(all.contains("## When to run it"), "{all}");
     assert!(!index.1.contains("## When to run it"), "{}", index.1);
+    assert!(!all.to_lowercase().contains("sentence"), "{all}");
+}
+
+#[test]
+fn fmt_is_an_unknown_command() {
+    let (code, out) = docfit(&["fmt"]);
+    assert_eq!(code, 2, "{out}");
+    let answer: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert!(
+        answer["error"][0]["fault"]
+            .as_str()
+            .unwrap()
+            .contains("unrecognized subcommand 'fmt'"),
+        "{answer}"
+    );
 }

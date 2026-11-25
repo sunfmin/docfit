@@ -203,6 +203,17 @@ pub(crate) fn split(text: &str) -> Vec<Paragraph> {
     out
 }
 
+/// The longest paragraph of `text` outside fenced code, in characters, its
+/// lines joined on spaces; and the line (from 1) it starts on. `(0, 0)` when
+/// `text` has none.
+pub(crate) fn longest(text: &str) -> (usize, usize) {
+    split(text)
+        .iter()
+        .filter(|p| !p.fenced)
+        .map(|p| (p.text.chars().count(), p.line))
+        .fold((0, 0), |best, p| if p.0 > best.0 { p } else { best })
+}
+
 /// The ASCII digits `s` starts with.
 fn digits(s: &str) -> &str {
     &s[..s.bytes().take_while(u8::is_ascii_digit).count()]

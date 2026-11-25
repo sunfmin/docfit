@@ -6,7 +6,7 @@ mod common;
 use common::{docfit, repo};
 use serde_json::{Value, json};
 
-const CONFIG: &str = "catalogs = [\"App/**/*.xcstrings\"]\n\n[documents]\n\"SPEC.md\" = { kind = \"readme\", line = 400 }\n\"NOTES.md\" = \"readme\"\n\"docs/adr/*.md\" = \"adr\"\n\"docs/agents/*.md\" = \"agent\"\n";
+const CONFIG: &str = "catalogs = [\"App/**/*.xcstrings\"]\n\n[documents]\n\"SPEC.md\" = { kind = \"readme\", paragraph = 400 }\n\"NOTES.md\" = \"readme\"\n\"docs/adr/*.md\" = \"adr\"\n\"docs/agents/*.md\" = \"agent\"\n";
 
 const CATALOG: &str = r#"{ "strings": { "save": { "localizations": { "zh-Hans": { "stringUnit": { "value": "保存" } }, "en": { "stringUnit": { "value": "Cancel" } } } } } }"#;
 
