@@ -12,15 +12,19 @@ pub(crate) enum Kind {
     Adr,
     Glossary,
     DesignNote,
+    Skill,
+    Product,
 }
 
 impl Kind {
-    pub(crate) const ALL: [Kind; 5] = [
+    pub(crate) const ALL: [Kind; 7] = [
         Kind::Readme,
         Kind::Agent,
         Kind::Adr,
         Kind::Glossary,
         Kind::DesignNote,
+        Kind::Skill,
+        Kind::Product,
     ];
 
     /// The kind's name, as `docfit.toml` and the answers spell it; who reads
@@ -52,21 +56,34 @@ impl Kind {
                 "whoever changes one cross-module mechanism",
                 "one mechanism; off unless the repo turns it on",
             ),
+            Kind::Skill => (
+                "skill",
+                "an agent that has chosen to load it (`SKILL.md` and the files of its skill)",
+                "how to do one task",
+            ),
+            Kind::Product => (
+                "product",
+                "the product's users (store listings, privacy and support pages, model cards)",
+                "what the product shows or publishes",
+            ),
         }
     }
 
-    /// The kind's default budget: a document's size in bytes, and its longest
-    /// paragraph in characters. A `docfit.toml` entry may set its own.
+    /// The kind's default budget: a document's size in bytes (`usize::MAX`
+    /// for a kind with no default size, which only an entry's `bytes`
+    /// bounds), and its longest paragraph in characters. A `docfit.toml`
+    /// entry may set its own.
     pub(crate) fn budget(self) -> Size {
-        let kb = match self {
-            Kind::Readme => 4,
-            Kind::Agent => 2,
-            Kind::Adr => 3,
-            Kind::Glossary => 8,
-            Kind::DesignNote => 6,
+        let bytes = match self {
+            Kind::Readme => 4 * 1024,
+            Kind::Agent => 2 * 1024,
+            Kind::Adr => 3 * 1024,
+            Kind::Glossary => 8 * 1024,
+            Kind::DesignNote | Kind::Skill => 6 * 1024,
+            Kind::Product => usize::MAX,
         };
         Size {
-            bytes: kb * 1024,
+            bytes,
             paragraph: 600,
         }
     }
@@ -81,13 +98,17 @@ impl Kind {
 
     /// The kind a file at `path` is by its place, if its place says one:
     /// `README.md` readme; `CLAUDE.md`, `AGENTS.md` and `docs/agents/` agent;
-    /// `GLOSSARY.md` glossary; `adr/` adr.
+    /// `GLOSSARY.md` glossary; `SKILL.md`, and a file in a skill's directory
+    /// `skills/<name>/`, skill; `adr/` adr. No place says `product`.
     pub(crate) fn conventional(path: &str) -> Option<Kind> {
         let (dir, file) = path.rsplit_once('/').unwrap_or(("", path));
+        let in_a_skill = || dir.split('/').rev().skip(1).any(|s| s == "skills");
         match file.to_ascii_lowercase().as_str() {
             "readme.md" => Some(Kind::Readme),
             "claude.md" | "agents.md" => Some(Kind::Agent),
             "glossary.md" => Some(Kind::Glossary),
+            "skill.md" => Some(Kind::Skill),
+            _ if in_a_skill() => Some(Kind::Skill),
             _ if dir.ends_with("docs/agents") => Some(Kind::Agent),
             _ if dir.ends_with("adr") => Some(Kind::Adr),
             _ => None,
@@ -107,9 +128,13 @@ impl Kind {
         );
         for kind in Kind::ALL {
             let ((name, reader, holds), budget) = (kind.facts(), kind.budget());
+            let bytes = match budget.bytes {
+                usize::MAX => "none; an entry may set one".to_string(),
+                bytes => bytes.to_string(),
+            };
             table.push_str(&format!(
-                "| `{name}` | {reader} | {holds} | {} | {} |\n",
-                budget.bytes, budget.paragraph
+                "| `{name}` | {reader} | {holds} | {bytes} | {} |\n",
+                budget.paragraph
             ));
         }
         table

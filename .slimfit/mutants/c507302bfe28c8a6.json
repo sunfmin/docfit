@@ -1,0 +1,27 @@
+{
+  "tree": "85b5c7bc4417c4ef7b3dd44b2581748cd639f49f+d1fba762150c532c",
+  "picker": "codex:01a21359-d95f-75c3-b793-be0374f63eb3:default",
+  "author": "claude-code:8ab79852-f790-5c23-ba63-ad5ac032e4ff:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/kind.rs:81:33: replace * with + in Kind::budget",
+        "why": "The new budget tests cover skill and product, so the glossary limit could drop from 8192 to 1032 bytes without those tests noticing.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/kind.rs:80:28: replace * with + in Kind::budget",
+        "why": "A short ADR still passes with the reduced 1027-byte limit, so testing its registration may miss the budget regression.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/kind.rs:79:30: replace * with + in Kind::budget",
+        "why": "The new CLAUDE.md fixture is ignored during init, so it cannot expose the agent limit dropping from 2048 to 1026 bytes.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}

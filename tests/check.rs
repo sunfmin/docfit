@@ -42,11 +42,19 @@ fn an_unregistered_markdown_file_is_red_with_the_line_that_registers_it() {
     assert_eq!(faults[1]["file"], "notes.md");
     assert_eq!(
         faults[1]["kinds"],
-        serde_json::json!(["readme", "agent", "adr", "glossary", "design-note"])
+        serde_json::json!([
+            "readme",
+            "agent",
+            "adr",
+            "glossary",
+            "design-note",
+            "skill",
+            "product"
+        ])
     );
     assert_eq!(
         faults[1]["fix"],
-        "add `\"notes.md\" = \"<kind>\"` under `[documents]` in docfit.toml, <kind> one of readme, agent, adr, glossary, design-note"
+        "add `\"notes.md\" = \"<kind>\"` under `[documents]` in docfit.toml, <kind> one of readme, agent, adr, glossary, design-note, skill, product"
     );
     assert_eq!(answer["next"], answer["faults"][0]["fix"]);
 }
@@ -101,7 +109,7 @@ fn an_unknown_kind_is_refused_with_the_kinds_listed() {
     );
     assert_eq!(
         errors[0]["fix"],
-        "give `SPEC.md` one of the kinds readme, agent, adr, glossary, design-note"
+        "give `SPEC.md` one of the kinds readme, agent, adr, glossary, design-note, skill, product"
     );
 }
 
@@ -134,7 +142,7 @@ fn a_docfit_toml_docfit_cannot_read_is_refused_with_its_fix() {
         ),
         (
             "[documents]\n\"README.md\" = { kind = \"readme\", size = 3 }\n",
-            "give `README.md` one of the kinds readme, agent, adr, glossary, design-note, as `\"<kind>\"` or `{ kind",
+            "give `README.md` one of the kinds readme, agent, adr, glossary, design-note, skill, product, as `\"<kind>\"` or `{ kind",
         ),
     ] {
         let dir = repo(&[("docfit.toml", toml), ("README.md", "r\n")]);
@@ -643,7 +651,15 @@ fn init_registers_each_file_by_its_place_and_holds_the_rest_to_rehome_green_that
     assert_eq!(rehome[0]["size"], 5);
     assert_eq!(
         rehome[0]["kinds"],
-        serde_json::json!(["readme", "agent", "adr", "glossary", "design-note"])
+        serde_json::json!([
+            "readme",
+            "agent",
+            "adr",
+            "glossary",
+            "design-note",
+            "skill",
+            "product"
+        ])
     );
     assert_eq!(answer["faults"], serde_json::json!([]), "{answer}");
     assert_eq!(answer["changed"], true);
@@ -889,5 +905,218 @@ fn init_holds_the_broken_pointers_present_so_check_is_green_on_them_that_day() {
     assert_eq!(
         code, 1,
         "a pointer dropped from the baseline is red again: {checked}"
+    );
+}
+
+#[test]
+fn a_skill_md_and_the_files_beside_it_under_skills_register_as_skill() {
+    let dir = repo(&[
+        ("README.md", "r\n"),
+        ("roles/coder/skills/tdd/SKILL.md", "s\n"),
+        ("roles/coder/skills/tdd/references/loop.md", "l\n"),
+        ("tools/SKILL.md", "t\n"),
+        ("skills.md", "x\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(
+        answer["registered"],
+        serde_json::json!({
+            "README.md": "readme",
+            "roles/coder/skills/tdd/SKILL.md": "skill",
+            "roles/coder/skills/tdd/references/loop.md": "skill",
+            "tools/SKILL.md": "skill"
+        })
+    );
+    assert_eq!(answer["rehome"][0]["file"], "skills.md");
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 0, "{checked}");
+    assert_eq!(checked["documents"]["tools/SKILL.md"], "skill");
+}
+
+#[test]
+fn a_skills_default_budget_is_6144_bytes() {
+    let toml = "[documents]\n\"SKILL.md\" = \"skill\"\n";
+    let text = "xx\n\n".repeat(1536);
+    let dir = repo(&[("docfit.toml", toml), ("SKILL.md", &text)]);
+    assert_eq!(check(dir.path()).0, 0);
+    std::fs::write(dir.path().join("SKILL.md"), text + "x").unwrap();
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 1, "{answer}");
+    assert_eq!(answer["faults"][0]["limit"], 6144);
+}
+
+#[test]
+fn a_product_document_has_no_default_size_and_an_entrys_bytes_holds() {
+    let big = "xx\n\n".repeat(12_500);
+    let toml = "[documents]\n\"docs/*.md\" = \"product\"\n";
+    let dir = repo(&[("docfit.toml", toml), ("docs/appstore.md", &big)]);
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["documents"]["docs/appstore.md"], "product");
+
+    let toml = "[documents]\n\"docs/*.md\" = { kind = \"product\", bytes = 20000 }\n";
+    let at = "xx\n\n".repeat(5000);
+    let dir = repo(&[("docfit.toml", toml), ("docs/appstore.md", &at)]);
+    assert_eq!(check(dir.path()).0, 0);
+    std::fs::write(dir.path().join("docs/appstore.md"), at + "x").unwrap();
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 1, "{answer}");
+    assert_eq!(answer["faults"][0]["fault"], "over_budget");
+    assert_eq!(answer["faults"][0]["limit"], 20000);
+
+    let long = "x".repeat(601);
+    let dir = repo(&[("docfit.toml", toml), ("docs/appstore.md", &long)]);
+    let (_, answer) = check(dir.path());
+    assert_eq!(
+        answer["faults"][0]["fault"], "paragraph_too_long",
+        "{answer}"
+    );
+}
+
+#[test]
+fn an_ignored_file_is_no_fault_and_held_by_no_baseline_entry() {
+    let toml = "ignore = [\"src/**\"]\n[documents]\n\"README.md\" = \"readme\"\n";
+    let dir = repo(&[
+        ("docfit.toml", toml),
+        ("README.md", "see `src/help.md`\n"),
+        ("src/help.md", &"x".repeat(9000)),
+        ("src/main.rs", "fn main() {}\n"),
+    ]);
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["faults"], serde_json::json!([]));
+    assert_eq!(answer["documents"].get("src/help.md"), None);
+    let (code, ratcheted) = docfit(dir.path(), &["ratchet"]);
+    assert_eq!(code, 0, "{ratcheted}");
+    assert_eq!(ratcheted["baseline"], serde_json::json!({}));
+
+    let both = "ignore = [\"src/**\"]\n[documents]\n\"**/*.md\" = \"readme\"\n";
+    std::fs::write(dir.path().join("docfit.toml"), both).unwrap();
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["documents"].get("src/help.md"), None);
+}
+
+#[test]
+fn the_fits_records_are_ignored_without_any_entry() {
+    let dir = repo(&[
+        ("docfit.toml", README_ONLY),
+        ("README.md", "r\n"),
+        (".slimfit/x.md", "x\n"),
+        (".truefit/y/z.md", "x\n"),
+    ]);
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 0, "{answer}");
+    let (_, adopted) = docfit(dir.path(), &["init"]);
+    assert_eq!(adopted["ignored"], serde_json::json!([]), "{adopted}");
+}
+
+#[test]
+fn an_ignore_that_is_not_a_list_of_globs_is_refused() {
+    let toml = "ignore = \"src/**\"\n[documents]\n";
+    let dir = repo(&[("docfit.toml", toml)]);
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 2, "{answer}");
+    assert!(
+        answer["error"][0]["fix"]
+            .as_str()
+            .unwrap()
+            .starts_with("write `ignore = [\"<glob>\", ...]`"),
+        "{answer}"
+    );
+}
+
+#[test]
+fn init_ignores_the_markdown_under_source_and_fixture_directories_and_lists_each_glob() {
+    let dir = repo(&[
+        ("README.md", "r\n"),
+        ("crates/cli/src/help.md", "h\n"),
+        ("crates/cli/src/topics/a.md", "a\n"),
+        ("crates/cli/src/scaffold/CLAUDE.md", "c\n"),
+        ("tests/fixtures/f.md", "f\n"),
+        ("docs/guide.md", "g\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(
+        answer["ignored"],
+        serde_json::json!([
+            { "glob": "crates/cli/src/**", "files": ["crates/cli/src/help.md", "crates/cli/src/scaffold/CLAUDE.md", "crates/cli/src/topics/a.md"] },
+            { "glob": "tests/**", "files": ["tests/fixtures/f.md"] }
+        ])
+    );
+    assert_eq!(
+        answer["registered"],
+        serde_json::json!({ "README.md": "readme" })
+    );
+    assert_eq!(answer["rehome"].as_array().unwrap().len(), 1, "{answer}");
+    assert_eq!(answer["rehome"][0]["file"], "docs/guide.md");
+    let toml = std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap();
+    assert!(
+        toml.starts_with("ignore = [\"crates/cli/src/**\", \"tests/**\"]\n\n# "),
+        "{toml}"
+    );
+    assert_eq!(check(dir.path()).0, 0);
+    let (_, again) = docfit(dir.path(), &["init"]);
+    assert_eq!(again["ignored"], serde_json::json!([]), "{again}");
+    assert_eq!(again["changed"], false, "{again}");
+}
+
+#[test]
+fn init_adds_to_an_ignore_already_written_and_leaves_a_directory_an_entry_registers() {
+    let toml = "# ours\nignore = [\n  \"vendor/**\",\n]\n\n[documents]\n\"README.md\" = \"readme\"\n\"lib/src/guide.md\" = \"readme\"\n";
+    let dir = repo(&[
+        ("docfit.toml", toml),
+        ("README.md", "r\n"),
+        ("lib/src/guide.md", "g\n"),
+        ("lib/src/other.md", "o\n"),
+        ("app/test/x.md", "x\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(
+        answer["ignored"],
+        serde_json::json!([{ "glob": "app/test/**", "files": ["app/test/x.md"] }])
+    );
+    assert_eq!(answer["rehome"][0]["file"], "lib/src/other.md", "{answer}");
+    let written = std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap();
+    assert_eq!(
+        written,
+        "# ours\nignore = [\"vendor/**\", \"app/test/**\"]\n\n[documents]\n\"README.md\" = \"readme\"\n\"lib/src/guide.md\" = \"readme\"\n"
+    );
+}
+
+#[test]
+fn init_refuses_an_ignore_it_cannot_add_a_glob_to_and_writes_nothing() {
+    let toml = "\"ignore\" = []\n[documents]\n";
+    let dir = repo(&[("docfit.toml", toml), ("src/help.md", "h\n")]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 2, "{answer}");
+    assert!(
+        answer["error"][0]["fix"].as_str().unwrap().starts_with(
+            "write `ignore = [\"<glob>\", ...]` in docfit.toml at the start of a line"
+        ),
+        "{answer}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap(),
+        toml
+    );
+    assert!(!dir.path().join(".docfit").exists());
+}
+
+#[test]
+fn init_writes_ignore_before_a_first_table_on_the_first_line() {
+    let dir = repo(&[
+        ("docfit.toml", README_ONLY),
+        ("README.md", "r\n"),
+        ("src/help.md", "h\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap(),
+        format!("ignore = [\"src/**\"]\n\n{README_ONLY}")
     );
 }
