@@ -13,6 +13,7 @@ pub(crate) const CONFIG: &str = "docfit.toml";
 pub(crate) const TABLE: &str = "documents";
 
 /// One fault in `docfit.toml` that stops the check, and its fix.
+#[derive(serde::Serialize)]
 pub(crate) struct Refusal {
     pub(crate) fault: String,
     pub(crate) fix: String,

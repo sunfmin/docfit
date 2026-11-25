@@ -80,12 +80,9 @@ fn an_unregistered_markdown_file_is_red_with_the_line_that_registers_it() {
         faults[1]["kinds"],
         serde_json::json!(["readme", "agent", "adr", "glossary", "design-note"])
     );
-    assert!(
-        faults[1]["fix"]
-            .as_str()
-            .unwrap()
-            .contains("`\"notes.md\" = \"<kind>\"`"),
-        "{answer}"
+    assert_eq!(
+        faults[1]["fix"],
+        "add `\"notes.md\" = \"<kind>\"` under `[documents]` in docfit.toml, <kind> one of readme, agent, adr, glossary, design-note"
     );
     assert_eq!(answer["next"], answer["faults"][0]["fix"]);
 }
@@ -212,9 +209,9 @@ fn a_file_whose_name_says_its_kind_is_offered_that_kind() {
     assert_eq!(
         serde_json::json!(kinds),
         serde_json::json!([
-            ["AGENTS.md", "agent"],
-            ["GLOSSARY.md", "glossary"],
-            ["a/README.md", "readme"]
+            ["AGENTS.md", ["agent"]],
+            ["GLOSSARY.md", ["glossary"]],
+            ["a/README.md", ["readme"]]
         ])
     );
 }

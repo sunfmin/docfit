@@ -20,35 +20,40 @@ impl Kind {
         Kind::DesignNote,
     ];
 
-    /// The name `docfit.toml` and the answers spell it with.
-    pub(crate) fn name(self) -> &'static str {
-        match self {
-            Kind::Readme => "readme",
-            Kind::Agent => "agent",
-            Kind::Adr => "adr",
-            Kind::Glossary => "glossary",
-            Kind::DesignNote => "design-note",
-        }
-    }
-
-    /// Who reads a document of this kind, and what it holds and nothing else.
-    fn reader_and_holds(self) -> (&'static str, &'static str) {
+    /// The kind's name, as `docfit.toml` and the answers spell it; who reads
+    /// a document of it; and what that document holds, nothing else.
+    fn facts(self) -> (&'static str, &'static str, &'static str) {
         match self {
             Kind::Readme => (
+                "readme",
                 "someone new to the repo",
                 "what it is, what it keeps where, how to build and run it",
             ),
             Kind::Agent => (
+                "agent",
                 "every agent, every turn (`CLAUDE.md`, `AGENTS.md`, `docs/agents/*`)",
                 "navigation pointers, invariants the code cannot show, unwritten conventions",
             ),
-            Kind::Adr => ("whoever would undo a decision", "one decision and why"),
-            Kind::Glossary => ("everyone", "the project's words, one or two sentences each"),
+            Kind::Adr => (
+                "adr",
+                "whoever would undo a decision",
+                "one decision and why",
+            ),
+            Kind::Glossary => (
+                "glossary",
+                "everyone",
+                "the project's words, one or two sentences each",
+            ),
             Kind::DesignNote => (
+                "design-note",
                 "whoever changes one cross-module mechanism",
                 "one mechanism; off unless the repo turns it on",
             ),
         }
+    }
+
+    pub(crate) fn name(self) -> &'static str {
+        self.facts().0
     }
 
     pub(crate) fn named(name: &str) -> Option<Kind> {
@@ -59,8 +64,7 @@ impl Kind {
     /// says, or, where its place says none, every kind.
     pub(crate) fn candidates(path: &str) -> Vec<Kind> {
         let (dir, file) = path.rsplit_once('/').unwrap_or(("", path));
-        let file = file.to_ascii_lowercase();
-        let conventional = match file.as_str() {
+        let conventional = match file.to_ascii_lowercase().as_str() {
             "readme.md" => Some(Kind::Readme),
             "claude.md" | "agents.md" => Some(Kind::Agent),
             "glossary.md" => Some(Kind::Glossary),
@@ -74,9 +78,8 @@ impl Kind {
     /// The kinds as a Markdown table, for the manual.
     pub(crate) fn table() -> String {
         let mut table = String::from("| kind | reader | holds only |\n|---|---|---|\n");
-        for kind in Kind::ALL {
-            let (reader, holds) = kind.reader_and_holds();
-            table.push_str(&format!("| `{}` | {reader} | {holds} |\n", kind.name()));
+        for (name, reader, holds) in Kind::ALL.map(Kind::facts) {
+            table.push_str(&format!("| `{name}` | {reader} | {holds} |\n"));
         }
         table
     }

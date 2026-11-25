@@ -21,6 +21,16 @@ fn help_is_the_manual() {
         out.starts_with("# `docfit`\n\nKeeps a repo's documents each in its one home"),
         "{out}"
     );
+    assert!(
+        out.contains(
+            "| kind | reader | holds only |\n|---|---|---|\n| `readme` | someone new to the repo |"
+        ),
+        "{out}"
+    );
+    assert!(
+        out.contains("| `design-note` | whoever changes one cross-module mechanism |"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -36,22 +46,6 @@ fn version_names_the_crate_version() {
     assert_eq!(
         docfit(&["--version"]),
         (0, format!("docfit {}\n", env!("CARGO_PKG_VERSION")))
-    );
-}
-
-#[test]
-fn the_manual_holds_the_kinds_table() {
-    let (code, out) = docfit(&["--help"]);
-    assert_eq!(code, 0);
-    assert!(
-        out.contains(
-            "| kind | reader | holds only |\n|---|---|---|\n| `readme` | someone new to the repo |"
-        ),
-        "{out}"
-    );
-    assert!(
-        out.contains("| `design-note` | whoever changes one cross-module mechanism |"),
-        "{out}"
     );
 }
 

@@ -7,6 +7,5 @@ cd "$(dirname "$0")"
 cargo fmt --check
 cargo clippy --all-targets --quiet -- -D warnings
 slimfit check
-cargo build --quiet
-./target/debug/docfit check
+cargo run --quiet -- check
 echo "gate: ok"

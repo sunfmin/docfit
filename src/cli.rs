@@ -124,10 +124,7 @@ pub(crate) fn run(args: impl IntoIterator<Item = std::ffi::OsString>) -> (String
         Err(e) => return refused(vec![refusal(e.to_string().trim(), "run `docfit --help`")]),
     };
     match cli.command {
-        Cmd::Check { repo } => match check(repo) {
-            Ok(done) => done,
-            Err(refusals) => refused(refusals),
-        },
+        Cmd::Check { repo } => check(repo).unwrap_or_else(refused),
         Cmd::Help { topic: None } => (help.index().expect("checked"), EXIT_OK),
         Cmd::Help { topic: Some(topic) } => match help.topic_help(&topic) {
             Ok(markdown) => (markdown, EXIT_OK),
@@ -171,11 +168,7 @@ pub(crate) fn refusal(fault: &str, fix: &str) -> Refusal {
 
 /// A command that could not finish: every fault and its fix, exit {EXIT_ERROR}.
 fn refused(refusals: Vec<Refusal>) -> (String, i32) {
-    let error: Vec<Value> = refusals
-        .into_iter()
-        .map(|r| json!({ "fault": r.fault, "fix": r.fix }))
-        .collect();
-    (pretty(&json!({ "error": error })), EXIT_ERROR)
+    (pretty(&json!({ "error": refusals })), EXIT_ERROR)
 }
 
 fn pretty(value: &Value) -> String {
