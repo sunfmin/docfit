@@ -61,6 +61,58 @@ pub(crate) struct Hold {
     /// The runs copied from another file it is held at (`restates`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) copies: Option<usize>,
+    /// The numbers with a unit it is held at (`measurement`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) measurements: Option<usize>,
+}
+
+/// Which count of a document's hold, shrink-only: `strings`, `copies` or
+/// `measurements`.
+pub(crate) type Slot = fn(&mut Hold) -> &mut Option<usize>;
+
+/// The count `baseline` holds `file` at in `slot`; 0 when it holds none.
+pub(crate) fn held(baseline: &Baseline, file: &str, slot: Slot) -> usize {
+    match baseline.get(file) {
+        Some(Held::Over(h)) => slot(&mut h.clone()).unwrap_or(0),
+        _ => 0,
+    }
+}
+
+/// `next` (the baseline the budgets ratchet to) holding each document of
+/// `counts`, its path and its count now, in `slot`: with no baseline yet
+/// (`held` `None`), at its count now; after that, at the smaller of what
+/// `held` holds and its count now, dropped at 0, and never added.
+pub(crate) fn ratchet_counts<'a>(
+    counts: impl Iterator<Item = (&'a str, usize)>,
+    slot: Slot,
+    held: Option<&Baseline>,
+    next: &mut Baseline,
+) {
+    for (file, now) in counts {
+        let count = held.map_or(now, |h| self::held(h, file, slot).min(now));
+        if count == 0 {
+            continue;
+        }
+        let entry = next
+            .entry(file.to_string())
+            .or_insert_with(|| Held::Over(Hold::default()));
+        // A document is never a file to rehome, which no kind registers.
+        let Held::Over(h) = entry else { continue };
+        *slot(h) = Some(count);
+    }
+}
+
+/// `next` holding each document's count now in `slot`, when it holds no
+/// document's count in it yet: `docfit init`'s adoption, which leaves a
+/// count already adopted as it is.
+pub(crate) fn adopt_counts<'a>(
+    counts: impl Iterator<Item = (&'a str, usize)>,
+    slot: Slot,
+    next: &mut Baseline,
+) {
+    if !next.keys().any(|f| held(next, f, slot) > 0) {
+        ratchet_counts(counts, slot, None, next);
+    }
 }
 
 /// What the baseline holds a file at: a document over its budget, or a file

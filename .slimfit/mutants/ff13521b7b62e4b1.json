@@ -1,0 +1,21 @@
+{
+  "tree": "8ad87d58d79ca419a95448430111f429c020e912+d1fba762150c532c",
+  "picker": "codex:01a2137b-296a-7e90-951d-243489e20008:default",
+  "author": "claude-code:f113844f-be22-5b57-aa37-07f655e26167:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/cli.rs:556:12: delete ! in Counted<'_>::adopt",
+        "why": "The new init test starts with a stored local-ref count and never exercises first-time adoption of configured local refs.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/restates.rs:273:5: replace adopt with ()",
+        "why": "The new init fixtures contain no catalog strings or copied runs, so their baseline assertions would miss skipped restatement adoption.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}

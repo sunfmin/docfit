@@ -92,7 +92,10 @@ fn each_paragraph_gets_its_features_and_its_suggested_home() {
     );
     assert_eq!(p[1]["home"], "delete");
 
-    assert_eq!(p[2]["evidence"], json!(["1.5 s", "63 MiB", "70 分钟"]));
+    assert_eq!(
+        p[2]["evidence"],
+        json!(["1.5 s", "63 MiB", "70 分钟", "100%"])
+    );
     assert_eq!(p[2]["local_refs"], json!(["#12", "rollmind#146"]));
     assert_eq!(p[2]["home"], "evidence");
 
