@@ -50,14 +50,13 @@ pub(crate) struct Entry {
 }
 
 /// `docfit.toml`, read: its entries, the globs of its string catalogs, the
-/// globs of what it ignores, [`IGNORED`] among them, and the names whose
-/// `<name>#<digits>` cites the local tracker (`None`: the check is off), and
-/// when a document is hot.
+/// globs of what it ignores, [`IGNORED`] among them, how its local refs are
+/// told, and when a document is hot.
 pub(crate) struct Config {
     pub(crate) entries: Vec<Entry>,
     pub(crate) catalogs: Vec<GlobMatcher>,
     ignore: Vec<GlobMatcher>,
-    pub(crate) local_refs: Option<Vec<String>>,
+    pub(crate) refs: refs::Rule,
     pub(crate) hot: Hot,
 }
 
@@ -157,23 +156,34 @@ pub(crate) fn config(config: &str) -> Result<Config, Vec<Refusal>> {
             &mut refusals,
         ))
         .collect();
-    let local_refs = table.get(refs::KEY).and_then(|value| {
+    let mut names = |key: &str, ok: fn(&str) -> bool, what: &str| {
+        let value = table.get(key)?;
         let names = value.clone().try_into::<Vec<String>>().ok();
-        let names = names.filter(|n| {
-            n.iter()
-                .all(|name| !name.is_empty() && name.chars().all(refs::named))
-        });
+        let names = names.filter(|n| n.iter().all(|name| ok(name)));
         if names.is_none() {
             refusals.push(Refusal {
-                fault: format!("`{}` = `{value}` is not a list of names", refs::KEY),
+                fault: format!("`{key}` = `{value}` is not a list of names"),
                 fix: format!(
-                    "write `{} = [\"<name>\", ...]` in {CONFIG}, before its first table: each a name whose `<name>#<digits>` cites the local tracker, of letters, digits, `-`, `_` and `.`",
-                    refs::KEY
+                    "write `{key} = [\"<name>\", ...]` in {CONFIG}, before its first table: each {what}"
                 ),
             });
         }
-        names
-    });
+        Some(names.unwrap_or_default())
+    };
+    let listed = names(
+        refs::KEY,
+        |n| !n.is_empty() && n.chars().all(refs::named),
+        "a name whose `<name>#<digits>` cites the local tracker, of letters, digits, `-`, `_` and `.`",
+    );
+    let not = names(
+        refs::NOT,
+        refs::is_name,
+        "a name whose `<name>#<digits>` is no ref to a tracker, `[a-z][a-z0-9_-]*`",
+    );
+    let refs = match listed {
+        Some(listed) => refs::Rule::Listed(listed),
+        None => refs::Rule::Unlisted(not.unwrap_or_default()),
+    };
     let hot = hot::read(table.get(hot::KEY)).unwrap_or_else(|r| {
         refusals.push(r);
         Hot::default()
@@ -216,7 +226,7 @@ pub(crate) fn config(config: &str) -> Result<Config, Vec<Refusal>> {
             entries,
             catalogs,
             ignore,
-            local_refs,
+            refs,
             hot,
         })
     } else {
@@ -443,20 +453,7 @@ fn ignore_more<'a>(
     let mut lines: Vec<&str> = text.lines().collect();
     let header = |l: &&str| l.trim_start().starts_with('[');
     let (at, new) = if table.contains_key(IGNORE) {
-        let key = |l: &&str| {
-            l.strip_prefix(IGNORE)
-                .is_some_and(|rest| rest.trim_start().starts_with('='))
-        };
-        let start = lines.iter().take_while(|l| !header(l)).position(key);
-        let end = start.and_then(|start| {
-            (start + 1..=lines.len()).find(|&end| {
-                lines[start..end]
-                    .join("\n")
-                    .parse::<toml::Table>()
-                    .is_ok_and(|t| t.contains_key(IGNORE))
-            })
-        });
-        let (Some(start), Some(end)) = (start, end) else {
+        let Some(span) = key_lines(&lines, IGNORE) else {
             return Err(vec![Refusal {
                 fault: format!(
                     "{CONFIG} has `{IGNORE}` but not as a line `{IGNORE} = [...]` before its first table"
@@ -466,7 +463,7 @@ fn ignore_more<'a>(
                 ),
             }]);
         };
-        (start..end, vec![line.as_str()])
+        (span, vec![line.as_str()])
     } else {
         let mut at = lines.iter().position(header).unwrap_or(0);
         while at > 0 && lines[at - 1].trim_start().starts_with('#') {
@@ -476,4 +473,40 @@ fn ignore_more<'a>(
     };
     lines.splice(at, new);
     Ok(lines.join("\n") + "\n")
+}
+
+/// The lines of `lines` that write `key`, a line `<key> = ...` before the
+/// first table and the lines its value runs on to; `None` when it is not
+/// written so.
+fn key_lines(lines: &[&str], key: &str) -> Option<std::ops::Range<usize>> {
+    let header = |l: &&str| l.trim_start().starts_with('[');
+    let at = |l: &&str| {
+        l.strip_prefix(key)
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+    };
+    let start = lines.iter().take_while(|l| !header(l)).position(at)?;
+    let end = (start + 1..=lines.len()).find(|&end| {
+        lines[start..end]
+            .join("\n")
+            .parse::<toml::Table>()
+            .is_ok_and(|t| t.contains_key(key))
+    })?;
+    Some(start..end)
+}
+
+/// `text` without `key`: its lines, and the comment lines just above them
+/// that name it. `None` when `key` is not written as a line `<key> = ...`
+/// before the first table.
+pub(crate) fn without(text: &str, key: &str) -> Option<String> {
+    let mut lines: Vec<&str> = text.lines().collect();
+    let span = key_lines(&lines, key)?;
+    let mut start = span.start;
+    while start > 0
+        && lines[start - 1].trim_start().starts_with('#')
+        && lines[start - 1].contains(key)
+    {
+        start -= 1;
+    }
+    lines.drain(start..span.end);
+    Some(lines.join("\n") + "\n")
 }

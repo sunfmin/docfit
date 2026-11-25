@@ -18,10 +18,7 @@ fn indebted() -> tempfile::TempDir {
         "Words run on. ".repeat(400).trim_end()
     );
     let dir = repo(&[
-        (
-            "docfit.toml",
-            "local_issue_refs = [\"proj\"]\n[documents]\n\"README.md\" = \"readme\"\n",
-        ),
+        ("docfit.toml", "[documents]\n\"README.md\" = \"readme\"\n"),
         ("README.md", &readme),
         (
             "SPEC.md",
@@ -41,7 +38,7 @@ fn a_baseline_with_debt_answers_one_task_of_each_kind() {
     assert_eq!(answer["by"], format!("docfit {}", env!("DOCFIT_VERSION")));
     assert_eq!(
         answer["counts"],
-        json!({ "rehome": 1, "over-budget": 1, "local-refs": 1, "restates": 1, "measurement": 1, "hot-file": 0, "must_read_bytes": 0 })
+        json!({ "drop-local-issue-refs": 0, "rehome": 1, "over-budget": 1, "local-refs": 1, "restates": 1, "measurement": 1, "hot-file": 0, "must_read_bytes": 0 })
     );
     let tasks = answer["tasks"].as_array().unwrap();
     assert_eq!(tasks.len(), 5, "{answer}");
@@ -127,7 +124,7 @@ fn the_steps_are_the_text_help_rehome_prints_and_put_the_map_in_the_commit() {
 
 #[test]
 fn a_task_paid_and_ratcheted_is_gone() {
-    let none = json!({ "rehome": 0, "over-budget": 0, "local-refs": 0, "restates": 0, "measurement": 0, "hot-file": 0, "must_read_bytes": 0 });
+    let none = json!({ "drop-local-issue-refs": 0, "rehome": 0, "over-budget": 0, "local-refs": 0, "restates": 0, "measurement": 0, "hot-file": 0, "must_read_bytes": 0 });
     let dir = indebted();
     std::fs::remove_file(dir.path().join("SPEC.md")).unwrap();
     std::fs::write(dir.path().join("README.md"), "# Readme\n").unwrap();

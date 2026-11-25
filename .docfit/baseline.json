@@ -1,12 +1,9 @@
 {
-  "src/cli.rs": {
-    "local_refs": 1
-  },
   "src/refs.rs": {
     "local_refs": 10
   },
   "tests/refs.rs": {
-    "local_refs": 17
+    "local_refs": 15
   },
   "tests/where.rs": {
     "local_refs": 4
