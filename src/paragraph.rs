@@ -379,6 +379,14 @@ fn prose(text: &str) -> String {
 
 const QUOTES: [(char, char); 4] = [('"', '"'), ('“', '”'), ('「', '」'), ('『', '』')];
 
+/// Every number with a unit outside fenced code and code spans in
+/// `paragraphs`, in order, with the line its paragraph starts on.
+pub(crate) fn evidence(paragraphs: &[Paragraph]) -> Vec<(usize, String)> {
+    let read = paragraphs.iter().filter(|p| !p.fenced);
+    read.flat_map(|p| measures(&prose(&p.text)).into_iter().map(|m| (p.line, m)))
+        .collect()
+}
+
 /// The strings quoted in `prose`, each at most 100 characters.
 fn quoted(prose: &str) -> Vec<String> {
     let (mut out, mut rest) = (Vec::new(), prose);
@@ -418,9 +426,9 @@ fn issues(prose: &str) -> Vec<String> {
     out
 }
 
-/// Units a measured number is written with, longest first where one starts
-/// another.
-const UNITS: [&str; 36] = [
+/// Units a measured number is written with: of time, of size, and `%`;
+/// longest first where one starts another.
+pub(crate) const UNITS: [&str; 33] = [
     "milliseconds",
     "seconds",
     "minutes",
@@ -431,7 +439,6 @@ const UNITS: [&str; 36] = [
     "hour",
     "days",
     "day",
-    "fps",
     "KiB",
     "MiB",
     "GiB",
@@ -444,7 +451,6 @@ const UNITS: [&str; 36] = [
     "µs",
     "us",
     "ns",
-    "px",
     "min",
     "sec",
     "毫秒",
@@ -452,15 +458,14 @@ const UNITS: [&str; 36] = [
     "小时",
     "秒",
     "天",
-    "倍",
-    "×",
     "s",
     "h",
     "B",
+    "%",
 ];
 
-/// Numbers with units: `1.5 s`, `63 MiB`, `70 分钟`; a bare percentage is
-/// not one (`100% offline`).
+/// Numbers with units: `1.5 s`, `63 MiB`, `70 分钟`, `40%`. `docfit where`
+/// calls them evidence, and `docfit check` counts them: one detector.
 fn measures(prose: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut rest = prose;

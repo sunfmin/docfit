@@ -4,6 +4,7 @@
 use crate::budget::{self, BASELINE, Baseline, Measured, Size, Stray};
 use crate::documents::{self, Answer, CATALOGS, CONFIG, Config, Document, Refusal, TABLE};
 use crate::kind::Kind;
+use crate::measurements;
 use crate::paragraph::{self, Adr, Home, Known};
 use crate::pointers::{self, Tree};
 use crate::refs::{self, Found};
@@ -59,7 +60,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Checks that every Markdown file git tracks is registered in `docfit.toml` under one kind, within its budget, and that what it points at is there; that no document restates a catalog's string or another file's lines anew; and that no tracked text file cites the local tracker anew.
+    /// Checks that every Markdown file git tracks is registered in `docfit.toml` under one kind, within its budget, and that what it points at is there; that no document restates a catalog's string or another file's lines anew, or holds a measurement anew; and that no tracked text file cites the local tracker anew.
     ///
     /// ## When to run it
     ///
@@ -85,7 +86,7 @@ enum Cmd {
     /// ignore = ["src/**", "tests/fixtures/**"]
     /// ```
     ///
-    /// The baseline maps a document to the measures it is held at over its budget and the pointers it is held at broken, a document to the catalog strings and copied runs it is held at (`strings`, `copies`), a file registered under no kind to the bytes it is held at to rehome, and any file to the local refs it is held at, as `docfit ratchet` writes it: `{"README.md": {"bytes": 65536, "paragraph": 18000, "pointers": ["docs/old.md"], "strings": 84}, "SPEC.md": {"rehome": 15360}, "src/a.rs": {"local_refs": 4}}`. A document within its budget is held at its budget. A pointer is held by what it is written as, its `pointer`: the same pointer written again in that document is held too.
+    /// The baseline maps a document to the measures it is held at over its budget and the pointers it is held at broken, a document to the catalog strings and copied runs it is held at (`strings`, `copies`) and the measurements (`measurements`), a file registered under no kind to the bytes it is held at to rehome, and any file to the local refs it is held at, as `docfit ratchet` writes it: `{"README.md": {"bytes": 65536, "paragraph": 18000, "pointers": ["docs/old.md"], "strings": 84}, "SPEC.md": {"rehome": 15360}, "src/a.rs": {"local_refs": 4}}`. A document within its budget is held at its budget. A pointer is held by what it is written as, its `pointer`: the same pointer written again in that document is held too.
     ///
     /// ## Restatements
     ///
@@ -95,6 +96,10 @@ enum Cmd {
     /// - `copies`: a run of {const:RUN} or more non-blank lines, each trimmed and blank lines between them skipped, that another text file git tracks and `ignore` does not match holds in the same order: code, or another document. A run in a fenced block that names its source, by its path or its file name, on its opening line or on the non-blank line before the block, is no copy of that file. A file that is a symbolic link is not read, so it restates nothing and nothing restates it. Keep the run in one place and point at it.
     ///
     /// A code span naming what is in the code is a pointer, the way a document should point at code: `docfit where` lists it, and it is never red. `docfit where` and `docfit check` find restatements by the one detector. The baseline holds each document's count of each, shrink-only: `docfit init` holds each document's counts when it adopts docfit, and of a measure a baseline holds no document's count of yet (so adding `catalogs` later, then running `docfit init`, holds the strings); `docfit ratchet` lowers a count to the count now, drops it at 0, and never adds one.
+    ///
+    /// ## Measurements
+    ///
+    /// A measured number written into a document is a snapshot: it goes stale on the next change, and nothing flags it. Its home is the decision it supports, the ADR, with the command that measures it, so a reader can run it again; or the acceptance it proves, a comment on the issue that accepted the work. `docfit check` is red, with the fault `measurement`, on a document of one of the kinds {const:UNMEASURED} holding more numbers with a unit than the baseline holds it at (none, unless held). A number with a unit is digits (`2`, `1.5`, `1,024`), not run on by a letter, digit, `.`, `#` or `_` before them, then, with a space between or none, one of {const:UNITS}, not run on by a letter or digit after a unit of letters, or a digit after another. It is read outside fenced code and code spans, as `docfit where` finds its `evidence` (`docfit where --help`): one detector. So a number that is a limit the document states in code (`fast_limit = 300`) is no measurement. The other kinds are not checked: an ADR is where a decision's measurement lives. Move each to its home, or delete it; a lesson's story (where and when it was learned) goes, and what was learned stays. The baseline holds each document's count, shrink-only: `docfit init` holds each document's count when it adopts docfit, or on a baseline that holds no document's count yet; `docfit ratchet` lowers it to the count now, drops it at 0, and never adds one.
     ///
     /// ## Local tracker refs
     ///
@@ -116,6 +121,7 @@ enum Cmd {
     ///
     ///     A fenced code block points at nothing.
     ///   - `restates`: the document holds `size` restatements of the kind `restates` (`strings` or `copies`, see Restatements above), over `limit`, the count the baseline holds it at; `line` is where the first past that count starts (a string's paragraph), `found` what it is (the string, or the run's first line) and `from` where the repo already says it (the catalog, or `<file>:<line>` of the run copied).
+    ///   - `measurement`: the document holds `size` numbers with a unit (see Measurements above), over `limit`, the count the baseline holds it at; `found` is the first past that count, and `line` where its paragraph starts.
     ///   - `local_ref`: any text file it reads (see Local tracker refs above) holds `size` refs, over `limit`, the count the baseline holds it at; `line` and `ref` are the first ref past that count, in file order. The fix: replace it with what it points at, or delete it.
     /// - `next`: the first fault's fix; with none, `docfit ratchet` when a file shrank below what the baseline holds or went from it, or that there is nothing to do.
     ///
@@ -161,7 +167,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads what `docfit check` reads; without a `{const:CONFIG}` it starts one. First it ignores Markdown that is code or a test's data: for each Markdown file git tracks that no glob ignores or registers, with one of {const:SOURCE} as a directory in its path, it adds the first such directory, as `<path>/**` (`crates/cli/src/**`), to `ignore`, unless an entry registers a file under it; the list is written again on one line where it was, or, without one, before the first table. Then it adds a line `"<path>" = "<kind>"` to the `[documents]` table for each Markdown file git tracks that no glob matches and whose place says its kind: `README.md` is `readme`; `CLAUDE.md`, `AGENTS.md` and a file in `docs/agents/` are `agent`; a file in `adr/` (such as `docs/adr/`) is `adr`; `GLOSSARY.md` is `glossary`; `SKILL.md`, and a file in a skill's directory `skills/<name>/` (such as its `references/`), is `skill`. No place says `product`: docfit does not guess it. Every other line already in `{const:CONFIG}`, and its comments, are kept as they are. Without a baseline yet, it writes `{const:BASELINE}` as `docfit ratchet` does on a repo without one: each document over its budget held at its size now, each pointer broken now held in its document, and each Markdown file registered under no kind held to rehome at its size now. With a baseline, it leaves it as it is: once a repo has adopted docfit, its baseline only tightens; but on one that holds no local tracker refs yet, it holds each file's refs at their count now (`docfit check --help`, Local tracker refs), and likewise each document's catalog strings, or its copied runs, on one that holds no document's count of them yet (Restatements there). Each file is written whole, through a file beside it renamed over it, and only when it changes.
+    /// It reads what `docfit check` reads; without a `{const:CONFIG}` it starts one. First it ignores Markdown that is code or a test's data: for each Markdown file git tracks that no glob ignores or registers, with one of {const:SOURCE} as a directory in its path, it adds the first such directory, as `<path>/**` (`crates/cli/src/**`), to `ignore`, unless an entry registers a file under it; the list is written again on one line where it was, or, without one, before the first table. Then it adds a line `"<path>" = "<kind>"` to the `[documents]` table for each Markdown file git tracks that no glob matches and whose place says its kind: `README.md` is `readme`; `CLAUDE.md`, `AGENTS.md` and a file in `docs/agents/` are `agent`; a file in `adr/` (such as `docs/adr/`) is `adr`; `GLOSSARY.md` is `glossary`; `SKILL.md`, and a file in a skill's directory `skills/<name>/` (such as its `references/`), is `skill`. No place says `product`: docfit does not guess it. Every other line already in `{const:CONFIG}`, and its comments, are kept as they are. Without a baseline yet, it writes `{const:BASELINE}` as `docfit ratchet` does on a repo without one: each document over its budget held at its size now, each pointer broken now held in its document, and each Markdown file registered under no kind held to rehome at its size now. With a baseline, it leaves it as it is: once a repo has adopted docfit, its baseline only tightens; but on one that holds no local tracker refs yet, it holds each file's refs at their count now (`docfit check --help`, Local tracker refs), and likewise each document's catalog strings, its copied runs, or its measurements, on one that holds no document's count of them yet (Restatements and Measurements there). Each file is written whole, through a file beside it renamed over it, and only when it changes.
     ///
     /// ## What it answers
     ///
@@ -256,7 +262,7 @@ enum Cmd {
     /// - `code`: the code spans, one word each, that are a path git tracks (a file or a directory) or that a tracked text file not ending `.md` holds as a whole word, as `git grep -w` finds it (a file with a NUL byte in its first 8000 is binary, and not read).
     /// - `strings`: the strings quoted with `"…"`, `“…”`, `「…」` or `『…』` that a catalog holds verbatim as a quoted string.
     /// - `copies`: where each run it starts that is copied from another tracked file is, `<file>:<line>`, as `docfit check` finds it (`docfit check --help`, Restatements). Listed only: it suggests no home, since either copy may be the one to keep.
-    /// - `evidence`: numbers with units (`1.5 s`, `63 MiB`, `70 分钟`).
+    /// - `evidence`: numbers with units (`1.5 s`, `63 MiB`, `70 分钟`, `40%`), as `docfit check` counts its measurements (`docfit check --help`, Measurements).
     /// - `local_refs`: references to the local tracker's issues (`#123`, `<checkout>#123`). Only this host can open them, so a repo's content never cites one.
     /// - `decision`: a choice or a reason (`because`, `chose`, `choose`, `因为`, `选`) beside an alternative (`instead of`, `rather than`, `而不是`, `而非`); both, or none is seen.
     /// - `pointer`: each of its parts, cut at `.`, `?`, `!`, `。`, `！`, `？` or `；`, names where something is and little else: a link or a tracked path in a code span, a word saying where (`see`, `in`, `at`, `under`, `lives`, `见`, `在`, `位于`, `→`) unless the part is only those, and at most 8 other words (a CJK character counts a half).
@@ -403,6 +409,8 @@ pub(crate) fn help() -> Help {
         .constant("IGNORED", quoted(&documents::IGNORED))
         .constant("LOCAL_REFS", refs::KEY)
         .constant("RUN", restates::RUN)
+        .constant("UNMEASURED", quoted(&Kind::UNMEASURED.map(Kind::name)))
+        .constant("UNITS", quoted(&paragraph::UNITS))
         .constant("SOURCE", quoted(&documents::SOURCE))
         .constant("ADRS", pointers::ADRS)
         .constant("EXTENSIONS", pointers::extensions())
@@ -507,43 +515,78 @@ impl Read {
         })
     }
 
-    /// What each document `answer` registers restates, against the other
-    /// text files and the catalogs.
-    fn restated(&self, answer: &Answer) -> BTreeMap<&str, Restates> {
+    /// What is counted in the files: the local refs, and what each document
+    /// `answer` registers restates, against the other text files and the
+    /// catalogs, and measures.
+    fn counted(&self, answer: &Answer) -> Counted<'_> {
         let index = Index::new(&self.kept);
-        let documents = self
-            .kept
-            .iter()
-            .filter(|t| answer.documents.contains_key(&t.path));
-        documents
-            .map(|t| {
-                (
-                    t.path.as_str(),
-                    restates::find(
-                        &t.path,
-                        &t.text,
-                        &paragraph::split(&t.text),
-                        &self.catalogs,
-                        &index,
-                    ),
-                )
-            })
-            .collect()
+        let (mut restated, mut measured) = (BTreeMap::new(), measurements::Found::new());
+        for t in &self.kept {
+            let Some(doc) = answer.documents.get(&t.path) else {
+                continue;
+            };
+            let paragraphs = paragraph::split(&t.text);
+            let found = restates::find(&t.path, &t.text, &paragraphs, &self.catalogs, &index);
+            restated.insert(t.path.as_str(), found);
+            if let Some(found) = measurements::find(doc.kind, &paragraphs) {
+                measured.insert(t.path.as_str(), found);
+            }
+        }
+        Counted {
+            refs: self.found.as_ref(),
+            restated,
+            measured,
+        }
     }
 }
 
-/// The baseline `held` ratchets to: the budgets', the local refs' and the
-/// restatements'.
+/// What the baseline holds a count of in each file: its local refs, and a
+/// document's restatements and measurements.
+struct Counted<'a> {
+    refs: Option<&'a Found>,
+    restated: BTreeMap<&'a str, Restates>,
+    measured: measurements::Found<'a>,
+}
+
+impl Counted<'_> {
+    /// The faults of each count over what `baseline` holds.
+    fn faults(&self, baseline: Option<&Baseline>) -> Vec<Value> {
+        let mut faults = self
+            .refs
+            .map_or_else(Vec::new, |f| refs::check(f, baseline));
+        faults.extend(restates::check(&self.restated, baseline));
+        faults.extend(measurements::check(&self.measured, baseline));
+        faults
+    }
+
+    /// `next` holding each count as `held` ratchets to.
+    fn ratchet(&self, held: Option<&Baseline>, next: &mut Baseline) {
+        refs::ratchet(self.refs, held, next);
+        restates::ratchet(&self.restated, held, next);
+        measurements::ratchet(&self.measured, held, next);
+    }
+
+    /// `next` holding each count it holds none of yet: `docfit init`'s
+    /// adoption.
+    fn adopt(&self, next: &mut Baseline) {
+        // A baseline holding no refs has not adopted the check: hold them now.
+        if !refs::adopted(next) {
+            refs::ratchet(self.refs, None, next);
+        }
+        restates::adopt(&self.restated, next);
+        measurements::adopt(&self.measured, next);
+    }
+}
+
+/// The baseline `held` ratchets to: the budgets' and the counts'.
 fn ratcheted(
     docs: &[Measured],
     strays: &[Stray],
-    found: Option<&Found>,
-    restated: &BTreeMap<&str, Restates>,
+    counted: &Counted,
     held: Option<&Baseline>,
 ) -> Baseline {
     let mut next = budget::ratchet(docs, strays, held);
-    refs::ratchet(found, held, &mut next);
-    restates::ratchet(restated, held, &mut next);
+    counted.ratchet(held, &mut next);
     next
 }
 
@@ -627,14 +670,13 @@ fn strays<'a>(top: &Path, answer: &'a Answer) -> Result<Vec<Stray<'a>>, Vec<Refu
 }
 
 /// Every fault, in path order: `answer`'s that are not a stray's, those
-/// `budget::check` finds in `docs` and `strays` against `baseline`, those
-/// `refs::check` finds in `found`, and those `restates::check` finds in
-/// `restated`.
+/// `budget::check` finds in `docs` and `strays` against `baseline`, and
+/// those of `counted`.
 fn faults(
     answer: &Answer,
     docs: &[Measured],
     strays: &[Stray],
-    (found, restated): (Option<&Found>, &BTreeMap<&str, Restates>),
+    counted: &Counted,
     baseline: Option<&Baseline>,
 ) -> Vec<Value> {
     let mut faults: Vec<Value> = answer
@@ -644,8 +686,7 @@ fn faults(
         .cloned()
         .collect();
     faults.extend(budget::check(docs, strays, baseline));
-    faults.extend(found.map_or_else(Vec::new, |f| refs::check(f, baseline)));
-    faults.extend(restates::check(restated, baseline));
+    faults.extend(counted.faults(baseline));
     faults.sort_by(|a, b| a["file"].as_str().cmp(&b["file"].as_str()));
     faults
 }
@@ -671,17 +712,16 @@ fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let top = top(repo)?;
     let (answer, tracked, config) = registered_at(&top)?;
     let seen = Read::at(&top, &config, &tracked)?;
-    let restated = seen.restated(&answer);
+    let counted = seen.counted(&answer);
     let texts = read(&top, &answer)?;
     let docs = measured(&texts, &Tree::new(&tracked));
     let strays = strays(&top, &answer)?;
     let held = baseline(&top)?;
-    let found = seen.found.as_ref();
-    let faults = faults(&answer, &docs, &strays, (found, &restated), held.as_ref());
+    let faults = faults(&answer, &docs, &strays, &counted, held.as_ref());
     let tighter = held
         .as_ref()
-        .is_some_and(|h| &ratcheted(&docs, &strays, found, &restated, Some(h)) != h);
-    let off = if found.is_none() {
+        .is_some_and(|h| &ratcheted(&docs, &strays, &counted, Some(h)) != h);
+    let off = if counted.refs.is_none() {
         format!(
             "; the `local_ref` check is off: to turn it on, write `{} = [\"<name>\", ...]` in {CONFIG}, the names whose `<name>#<digits>` cites the local tracker (`docfit check --help`)",
             refs::KEY
@@ -727,19 +767,14 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let strays = strays(&top, &answer)?;
     let docs = measured(&texts, &Tree::new(&files));
     let seen = Read::at(&top, &adopting, &files)?;
-    let restated = seen.restated(&answer);
-    let found = seen.found.as_ref();
+    let counted = seen.counted(&answer);
     let held = baseline(&top)?;
     let adopted = held.is_none();
     let mut next = match &held {
         Some(held) => held.clone(),
         None => budget::ratchet(&docs, &strays, None),
     };
-    // A baseline holding no refs has not adopted the check: hold them now.
-    if !refs::adopted(&next) {
-        refs::ratchet(found, None, &mut next);
-    }
-    restates::adopt(&restated, &mut next);
+    counted.adopt(&mut next);
     let wrote_baseline = held.as_ref() != Some(&next);
     if wrote_baseline {
         write(&top.join(BASELINE), &(pretty(&json!(next)) + "\n"))?;
@@ -753,7 +788,7 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
         .filter(|_| adopted)
         .map(|s| json!({ "file": s.file, "size": s.bytes, "kinds": s.fault["kinds"], "fix": s.fault["fix"] }))
         .collect();
-    let faults = faults(&answer, &docs, &strays, (found, &restated), Some(&next));
+    let faults = faults(&answer, &docs, &strays, &counted, Some(&next));
     let changed = wrote_baseline || wrote_config;
     let then = match faults.first() {
         Some(first) => first["fix"].clone(),
@@ -785,18 +820,12 @@ fn ratchet(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let top = top(repo)?;
     let (answer, tracked, config) = registered_at(&top)?;
     let seen = Read::at(&top, &config, &tracked)?;
-    let restated = seen.restated(&answer);
+    let counted = seen.counted(&answer);
     let texts = read(&top, &answer)?;
     let docs = measured(&texts, &Tree::new(&tracked));
     let held = baseline(&top)?;
     let strays = strays(&top, &answer)?;
-    let next = ratcheted(
-        &docs,
-        &strays,
-        seen.found.as_ref(),
-        &restated,
-        held.as_ref(),
-    );
+    let next = ratcheted(&docs, &strays, &counted, held.as_ref());
     let changed = held.as_ref() != Some(&next);
     if changed {
         write(&top.join(BASELINE), &(pretty(&json!(next)) + "\n"))?;

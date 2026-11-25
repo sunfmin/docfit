@@ -61,6 +61,9 @@ pub(crate) struct Hold {
     /// The runs copied from another file it is held at (`restates`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) copies: Option<usize>,
+    /// The numbers with a unit it is held at (`measurement`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) measurements: Option<usize>,
 }
 
 /// What the baseline holds a file at: a document over its budget, or a file

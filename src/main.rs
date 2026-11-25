@@ -5,6 +5,7 @@ mod budget;
 mod cli;
 mod documents;
 mod kind;
+mod measurements;
 mod paragraph;
 mod pointers;
 mod refs;

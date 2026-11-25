@@ -27,6 +27,11 @@ impl Kind {
         Kind::Product,
     ];
 
+    /// The kinds whose documents hold no measurement (`docfit check`): a
+    /// measured number in one goes stale on the next change. Its home is the
+    /// ADR of the decision it supports, or the issue that accepted the work.
+    pub(crate) const UNMEASURED: [Kind; 3] = [Kind::Readme, Kind::Agent, Kind::Skill];
+
     /// The kind's name, as `docfit.toml` and the answers spell it; who reads
     /// a document of it; and what that document holds, nothing else.
     fn facts(self) -> (&'static str, &'static str, &'static str) {
