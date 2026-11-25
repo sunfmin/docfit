@@ -207,7 +207,7 @@ fn a_file_whose_name_says_its_kind_is_offered_that_kind() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|f| (f["file"].clone(), f["kinds"][0].clone()))
+        .map(|f| (f["file"].clone(), f["kinds"].clone()))
         .collect();
     assert_eq!(
         serde_json::json!(kinds),
