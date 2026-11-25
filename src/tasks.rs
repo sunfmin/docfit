@@ -6,57 +6,38 @@
 use crate::budget::{Baseline, Held, Measured, Rehome, Size, Stray};
 use serde_json::{Value, json};
 
-/// A kind of task, in the order `docfit next` answers them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TaskKind {
-    Rehome,
-    OverBudget,
-}
-
-impl TaskKind {
-    pub(crate) const ALL: [TaskKind; 2] = [TaskKind::Rehome, TaskKind::OverBudget];
-
-    pub(crate) fn name(self) -> &'static str {
-        match self {
-            TaskKind::Rehome => "rehome",
-            TaskKind::OverBudget => "over-budget",
-        }
-    }
-}
-
-/// One file of debt: its kind, its path, a line saying what it is, and what
-/// was measured of it (without what `docfit where` sees in it).
+/// One file of debt: its path, a line saying what it is, and what was
+/// measured of it (without what `docfit where` sees in it).
 #[derive(Debug, PartialEq)]
 pub(crate) struct Debt<'a> {
-    pub(crate) kind: TaskKind,
     pub(crate) file: &'a str,
     pub(crate) summary: String,
     pub(crate) evidence: Value,
 }
 
-/// The debt `baseline` holds of `strays` and `docs`: rehome first, then
-/// over-budget, each in path order. A file it holds that is neither (gone,
-/// registered since, or back within its budget) is none: `docfit ratchet`
-/// drops it.
+/// The debt `baseline` holds of `strays` and `docs`, by kind, in the order
+/// `docfit next` answers them: `rehome`, then `over-budget`, each in path
+/// order. A file it holds that is neither (gone, registered since, or back
+/// within its budget) is none: `docfit ratchet` drops it.
 pub(crate) fn debt<'a>(
     docs: &[Measured<'a>],
     strays: &[Stray<'a>],
     baseline: &Baseline,
-) -> Vec<Debt<'a>> {
-    let mut out = Vec::new();
+) -> [(&'static str, Vec<Debt<'a>>); 2] {
+    let mut rehome = Vec::new();
     for stray in strays {
-        if let Some(Held::Rehome(Rehome { rehome })) = baseline.get(stray.file) {
-            out.push(Debt {
-                kind: TaskKind::Rehome,
+        if let Some(Held::Rehome(Rehome { rehome: held })) = baseline.get(stray.file) {
+            rehome.push(Debt {
                 file: stray.file,
                 summary: format!(
                     "`{}` ({} bytes) is registered under no kind, held to rehome: move its content to its homes",
                     stray.file, stray.bytes
                 ),
-                evidence: json!({ "size": stray.bytes, "held": rehome }),
+                evidence: json!({ "size": stray.bytes, "held": held }),
             });
         }
     }
+    let mut over_budget = Vec::new();
     for doc in docs {
         let Some(Held::Over(held)) = baseline.get(doc.file) else {
             continue;
@@ -77,8 +58,7 @@ pub(crate) fn debt<'a>(
         if measures.is_empty() {
             continue;
         }
-        out.push(Debt {
-            kind: TaskKind::OverBudget,
+        over_budget.push(Debt {
             file: doc.file,
             summary: format!(
                 "`{}` is {}, its budget: cut it to what its kind holds",
@@ -88,7 +68,7 @@ pub(crate) fn debt<'a>(
             evidence: json!({ "size": doc.size, "budget": doc.budget, "held": held }),
         });
     }
-    out
+    [("rehome", rehome), ("over-budget", over_budget)]
 }
 
 #[cfg(test)]
@@ -104,15 +84,15 @@ mod tests {
             bytes: 9,
             fault: &fault,
         }];
-        assert_eq!(debt(&[], &strays, &Baseline::new()), vec![]);
+        assert_eq!(debt(&[], &strays, &Baseline::new())[0].1, vec![]);
         let mut baseline = Baseline::new();
         baseline.insert("NEW.md".into(), Held::Rehome(Rehome { rehome: 9 }));
-        assert_eq!(debt(&[], &strays, &baseline)[0].kind, TaskKind::Rehome);
+        assert_eq!(debt(&[], &strays, &baseline)[0].1[0].file, "NEW.md");
     }
 
     #[test]
-    fn a_held_measure_back_within_budget_is_no_debt() {
-        let (budget, size) = (Size { bytes: 10, line: 5 }, Size { bytes: 8, line: 9 });
+    fn a_held_measure_at_or_within_budget_is_no_debt() {
+        let (budget, size) = (Size { bytes: 8, line: 5 }, Size { bytes: 8, line: 9 });
         let docs = [Measured {
             file: "R.md",
             budget,
@@ -127,7 +107,7 @@ mod tests {
                 line: None,
             }),
         );
-        assert_eq!(debt(&docs, &[], &baseline), vec![]);
+        assert_eq!(debt(&docs, &[], &baseline)[1].1, vec![]);
         baseline.insert(
             "R.md".into(),
             Held::Over(Hold {
@@ -135,10 +115,10 @@ mod tests {
                 line: Some(9),
             }),
         );
-        let line_only = &debt(&docs, &[], &baseline)[0];
-        assert_eq!(line_only.kind, TaskKind::OverBudget);
+        let [_, (kind, over)] = debt(&docs, &[], &baseline);
+        assert_eq!(kind, "over-budget");
         assert_eq!(
-            line_only.summary,
+            over[0].summary,
             "`R.md` is its longest line 9 characters, over 5, its budget: cut it to what its kind holds"
         );
     }

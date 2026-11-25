@@ -8,7 +8,7 @@ use crate::paragraph::{self, Adr, Home, Known};
 use crate::pointers::{self, Tree};
 use crate::repo;
 use crate::sentences;
-use crate::tasks::{self, TaskKind};
+use crate::tasks;
 use agent_help::{Help, Topic};
 use clap::{FromArgMatches, Parser, Subcommand};
 use serde_json::{Value, json};
@@ -764,30 +764,24 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
         ),
     };
     let steps = RehomeTopic::MARKDOWN;
-    let mut tasks = Vec::new();
-    for debt in tasks::debt(&docs, &strays, &held) {
-        let text = tracked_text(&top, debt.file).map_err(|r| vec![r])?;
-        let mut evidence = debt.evidence;
-        evidence["where"] = seen.place(debt.file, &text);
-        tasks.push(json!({
-            "kind": debt.kind.name(), "summary": debt.summary, "files": [debt.file],
-            "steps": steps,
-            "accept": format!(
-                "`docfit ratchet`, then `docfit check` exits {EXIT_OK} and {BASELINE} no longer holds `{}`",
-                debt.file
-            ),
-            "evidence": evidence,
-        }));
+    let (mut tasks, mut counts) = (Vec::new(), serde_json::Map::new());
+    for (kind, debts) in tasks::debt(&docs, &strays, &held) {
+        counts.insert(kind.to_string(), json!(debts.len()));
+        for debt in debts {
+            let text = tracked_text(&top, debt.file).map_err(|r| vec![r])?;
+            let mut evidence = debt.evidence;
+            evidence["where"] = seen.place(debt.file, &text);
+            tasks.push(json!({
+                "kind": kind, "summary": debt.summary, "files": [debt.file],
+                "steps": steps,
+                "accept": format!(
+                    "`docfit ratchet`, then `docfit check` exits {EXIT_OK} and {BASELINE} no longer holds `{}`",
+                    debt.file
+                ),
+                "evidence": evidence,
+            }));
+        }
     }
-    let counts: serde_json::Map<String, Value> = TaskKind::ALL
-        .iter()
-        .map(|k| {
-            (
-                k.name().to_string(),
-                json!(tasks.iter().filter(|t| t["kind"] == k.name()).count()),
-            )
-        })
-        .collect();
     let then = if tasks.is_empty() {
         "nothing to do: the baseline holds no document over its budget and no file to rehome"
     } else {
