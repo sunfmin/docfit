@@ -70,6 +70,18 @@ enum Cmd {
     /// - `faults`: each file that is not registered under exactly one kind, in path order: `file`, `fault`, `kinds` and `fix`. Empty when there is none. `fault` is `unregistered` (no glob matches the file; `kinds` are the kinds it could be: the one its place says, such as `agent` for `CLAUDE.md` or a file in `docs/agents/`, otherwise every kind, and `fix` is the line to add) or `two_kinds` (globs of several kinds match it; `kinds` are those kinds).
     /// - `next`: the first fault's fix, or what to do when there is none.
     ///
+    /// For example, with `CLAUDE.md` registered and `notes.md` not:
+    ///
+    /// ```json
+    /// {
+    ///   "documents": { "CLAUDE.md": "agent" },
+    ///   "faults": [
+    ///     { "file": "notes.md", "fault": "unregistered", "kinds": ["readme", "agent", "adr", "glossary", "design-note"], "fix": "add `\"notes.md\" = \"<kind>\"` under `[documents]` in docfit.toml, <kind> one of readme, agent, adr, glossary, design-note" }
+    ///   ],
+    ///   "next": "add `\"notes.md\" = \"<kind>\"` under `[documents]` in docfit.toml, <kind> one of readme, agent, adr, glossary, design-note"
+    /// }
+    /// ```
+    ///
     /// It exits {const:EXIT_FAULTS} when there is a fault, {const:EXIT_OK} when there is none.
     ///
     /// ## What it may refuse
@@ -180,5 +192,8 @@ mod tests {
     #[test]
     fn the_manual_is_whole() {
         agent_help::check(&super::help()).unwrap();
+        <super::Cli as clap::CommandFactory>::command().debug_assert();
+        let manual = super::help().manual().unwrap();
+        assert!(!manual.contains("{const:"), "{manual}");
     }
 }
