@@ -448,3 +448,27 @@ fn a_baseline_it_cannot_read_or_write_is_refused() {
         "make .docfit/baseline.json readable, or restore it from git"
     );
 }
+
+#[test]
+fn at_its_budget_exactly_is_within_it() {
+    // Two lines of 7, the first reported; 16 bytes, not past a baseline.
+    let toml = "[documents]\n\"README.md\" = { kind = \"readme\", bytes = 10, line = 6 }\n";
+    let dir = repo(&[("docfit.toml", toml), ("README.md", "abcdefg\nabcdefg\n")]);
+    let (_, answer) = check(dir.path());
+    assert_eq!(answer["faults"][1]["line"], 1, "{answer}");
+    assert!(
+        answer["faults"][0]["fix"]
+            .as_str()
+            .unwrap()
+            .contains("(it is 16): "),
+        "{answer}"
+    );
+    docfit(dir.path(), "ratchet");
+    // Shrunk to its byte budget exactly: that measure leaves the baseline.
+    std::fs::write(dir.path().join("README.md"), "abcdefg\nb\n").unwrap();
+    docfit(dir.path(), "ratchet");
+    assert_eq!(
+        baseline(dir.path()),
+        serde_json::json!({ "README.md": { "line": 7 } })
+    );
+}

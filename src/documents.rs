@@ -129,12 +129,9 @@ pub(crate) fn check(entries: &[Entry], files: &[String]) -> Answer {
         faults: Vec::new(),
     };
     for file in files.iter().filter(|f| f.ends_with(".md")) {
-        let matching: Vec<&Entry> = entries
-            .iter()
-            .filter(|e| e.matcher.is_match(file))
-            .collect();
+        let matching = || entries.iter().filter(|e| e.matcher.is_match(file));
         let mut kinds: Vec<Kind> = Vec::new();
-        for entry in &matching {
+        for entry in matching() {
             if !kinds.contains(&entry.kind) {
                 kinds.push(entry.kind);
             }
@@ -142,11 +139,7 @@ pub(crate) fn check(entries: &[Entry], files: &[String]) -> Answer {
         match kinds.as_slice() {
             [kind] => {
                 let set = |measure: fn(&Entry) -> Option<usize>, default: usize| {
-                    matching
-                        .iter()
-                        .filter_map(|e| measure(e))
-                        .min()
-                        .unwrap_or(default)
+                    matching().filter_map(measure).min().unwrap_or(default)
                 };
                 let budget = Size {
                     bytes: set(|e| e.bytes, kind.budget().bytes),

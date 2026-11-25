@@ -1,7 +1,7 @@
 //! The command line, read against the manual: its commands, the manual's
 //! pages, and what docfit exits with.
 
-use crate::budget::{self, BASELINE, Baseline, Measured};
+use crate::budget::{self, BASELINE, Baseline, Measured, Size};
 use crate::documents::{self, Answer, CONFIG, Refusal, TABLE};
 use crate::kind::Kind;
 use crate::repo;
@@ -209,11 +209,20 @@ fn registered(repo: Option<PathBuf>) -> Result<(PathBuf, Answer), Vec<Refusal>> 
 }
 
 /// Each registered document's text, read from the working tree.
-fn texts(top: &Path, answer: &Answer) -> Result<Vec<String>, Vec<Refusal>> {
-    let (mut texts, mut refusals) = (Vec::new(), Vec::new());
-    for file in answer.documents.keys() {
+/// Each registered document, measured as it is read from the working tree.
+fn measured<'a>(top: &Path, answer: &'a Answer) -> Result<Vec<Measured<'a>>, Vec<Refusal>> {
+    let (mut docs, mut refusals) = (Vec::new(), Vec::new());
+    for (file, doc) in &answer.documents {
         match std::fs::read_to_string(top.join(file)) {
-            Ok(text) => texts.push(text),
+            Ok(text) => {
+                let (size, at) = Size::of(&text);
+                docs.push(Measured {
+                    file,
+                    budget: doc.budget,
+                    size,
+                    at,
+                });
+            }
             Err(e) => refusals.push(refusal(
                 &format!("cannot read `{file}`, which git tracks: {e}"),
                 &format!("restore `{file}` as UTF-8 text, or `git rm` it"),
@@ -221,29 +230,21 @@ fn texts(top: &Path, answer: &Answer) -> Result<Vec<String>, Vec<Refusal>> {
         }
     }
     if refusals.is_empty() {
-        Ok(texts)
+        Ok(docs)
     } else {
         Err(refusals)
     }
 }
 
-fn measured<'a>(answer: &'a Answer, texts: &'a [String]) -> Vec<Measured<'a>> {
-    answer
-        .documents
-        .iter()
-        .zip(texts)
-        .map(|((file, doc), text)| Measured {
-            file,
-            budget: doc.budget,
-            text,
-        })
-        .collect()
-}
-
 /// The baseline at the repo's top: `None` when it has none yet.
 fn baseline(top: &Path) -> Result<Option<Baseline>, Vec<Refusal>> {
     match std::fs::read_to_string(top.join(BASELINE)) {
-        Ok(text) => budget::baseline(&text).map(Some),
+        Ok(text) => serde_json::from_str(&text).map(Some).map_err(|e| {
+            vec![refusal(
+                &format!("{BASELINE} is not a baseline: {e}"),
+                &format!("restore {BASELINE} from git, or delete it and run `docfit ratchet`"),
+            )]
+        }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(vec![refusal(
             &format!("cannot read {BASELINE}: {e}"),
@@ -254,15 +255,10 @@ fn baseline(top: &Path) -> Result<Option<Baseline>, Vec<Refusal>> {
 
 fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let (top, answer) = registered(repo)?;
-    let texts = texts(&top, &answer)?;
-    let docs = measured(&answer, &texts);
+    let docs = measured(&top, &answer)?;
     let held = baseline(&top)?;
     let mut faults = answer.faults.clone();
-    faults.extend(budget::check(
-        &docs,
-        held.as_ref().unwrap_or(&Baseline::new()),
-        held.is_none(),
-    ));
+    faults.extend(budget::check(&docs, held.as_ref()));
     faults.sort_by(|a, b| a["file"].as_str().cmp(&b["file"].as_str()));
     let tighter = held
         .as_ref()
@@ -295,9 +291,9 @@ fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
 
 fn ratchet(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let (top, answer) = registered(repo)?;
-    let texts = texts(&top, &answer)?;
+    let docs = measured(&top, &answer)?;
     let held = baseline(&top)?;
-    let next = budget::ratchet(&measured(&answer, &texts), held.as_ref());
+    let next = budget::ratchet(&docs, held.as_ref());
     let changed = held.as_ref() != Some(&next);
     if changed {
         write(&top.join(BASELINE), &(pretty(&json!(next)) + "\n"))?;

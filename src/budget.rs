@@ -1,8 +1,7 @@
 //! Decides budgets: a document's size and longest line, against its budget
 //! and the baseline (`.docfit/baseline.json`), which only tightens. Pure: the
-//! documents' text and the baseline's arrive as arguments.
+//! documents' text sizes and the baseline arrive as arguments.
 
-use crate::documents::Refusal;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -53,27 +52,19 @@ pub(crate) struct Hold {
 /// grow past.
 pub(crate) type Baseline = BTreeMap<String, Hold>;
 
-/// One document to judge: its path, its budget, and its text.
+/// One document to judge: its path, its budget, its size, and the number
+/// (from 1) of its longest line.
 pub(crate) struct Measured<'a> {
     pub(crate) file: &'a str,
     pub(crate) budget: Size,
-    pub(crate) text: &'a str,
+    pub(crate) size: Size,
+    pub(crate) at: usize,
 }
 
-/// The baseline file's text read.
-pub(crate) fn baseline(text: &str) -> Result<Baseline, Vec<Refusal>> {
-    serde_json::from_str(text).map_err(|e| {
-        vec![Refusal {
-            fault: format!("{BASELINE} is not a baseline: {e}"),
-            fix: format!("restore {BASELINE} from git, or delete it and run `docfit ratchet`"),
-        }]
-    })
-}
-
-/// `adopting` (the repo has no baseline yet) adds to each fix the ratchet
-/// that holds every document at its size now.
-pub(crate) fn check(docs: &[Measured], baseline: &Baseline, adopting: bool) -> Vec<Value> {
-    let adopt = if adopting {
+/// With no baseline yet, each fix adds the ratchet that holds every
+/// document at its size now.
+pub(crate) fn check(docs: &[Measured], baseline: Option<&Baseline>) -> Vec<Value> {
+    let adopt = if baseline.is_none() {
         format!(
             "; or, adopting docfit, `docfit ratchet` writes {BASELINE}, holding every document at its size now"
         )
@@ -82,12 +73,15 @@ pub(crate) fn check(docs: &[Measured], baseline: &Baseline, adopting: bool) -> V
     };
     let mut faults = Vec::new();
     for doc in docs {
-        let held = baseline.get(doc.file).copied().unwrap_or_default();
+        let held = baseline
+            .and_then(|b| b.get(doc.file))
+            .copied()
+            .unwrap_or_default();
         let limit = Size {
             bytes: held.bytes.unwrap_or(0).max(doc.budget.bytes),
             line: held.line.unwrap_or(0).max(doc.budget.line),
         };
-        let (size, at) = Size::of(doc.text);
+        let (size, at) = (doc.size, doc.at);
         let grew = |budget: usize, limit: usize| {
             if limit > budget {
                 format!(", past the {limit} {BASELINE} holds it at")
@@ -125,7 +119,7 @@ pub(crate) fn check(docs: &[Measured], baseline: &Baseline, adopting: bool) -> V
 pub(crate) fn ratchet(docs: &[Measured], baseline: Option<&Baseline>) -> Baseline {
     let mut next = Baseline::new();
     for doc in docs {
-        let (now, _) = Size::of(doc.text);
+        let now = doc.size;
         let held = baseline.map(|b| b.get(doc.file).copied().unwrap_or_default());
         let hold = |now: usize, held: Option<Option<usize>>, budget: usize| {
             let at = match held {
