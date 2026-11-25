@@ -1,7 +1,7 @@
 //! The command line, read against the manual: its commands, the manual's
 //! pages, and what docfit exits with.
 
-use crate::budget::{self, BASELINE, Baseline, Held, Measured, Size, Stray};
+use crate::budget::{self, BASELINE, Baseline, Measured, Size, Stray};
 use crate::documents::{self, Answer, CONFIG, Refusal, TABLE};
 use crate::kind::Kind;
 use crate::repo;
@@ -333,13 +333,23 @@ fn strays<'a>(top: &Path, answer: &'a Answer) -> Result<Vec<Stray<'a>>, Vec<Refu
     }
 }
 
-/// `answer`'s faults that are not a stray's, which `budget::check` judges.
-fn faults(answer: &Answer) -> impl Iterator<Item = Value> + '_ {
-    answer
+/// Every fault, in path order: `answer`'s that are not a stray's, and those
+/// `budget::check` finds in `docs` and `strays` against `baseline`.
+fn faults(
+    answer: &Answer,
+    docs: &[Measured],
+    strays: &[Stray],
+    baseline: Option<&Baseline>,
+) -> Vec<Value> {
+    let mut faults: Vec<Value> = answer
         .faults
         .iter()
         .filter(|f| f["fault"] != "unregistered")
         .cloned()
+        .collect();
+    faults.extend(budget::check(docs, strays, baseline));
+    faults.sort_by(|a, b| a["file"].as_str().cmp(&b["file"].as_str()));
+    faults
 }
 
 /// The baseline at the repo's top: `None` when it has none yet.
@@ -364,9 +374,7 @@ fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let docs = measured(&top, &answer)?;
     let strays = strays(&top, &answer)?;
     let held = baseline(&top)?;
-    let mut faults: Vec<Value> = faults(&answer).collect();
-    faults.extend(budget::check(&docs, &strays, held.as_ref()));
-    faults.sort_by(|a, b| a["file"].as_str().cmp(&b["file"].as_str()));
+    let faults = faults(&answer, &docs, &strays, held.as_ref());
     let tighter = held
         .as_ref()
         .is_some_and(|h| &budget::ratchet(&docs, &strays, Some(h)) != h);
@@ -404,28 +412,25 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let answer = documents::check(&documents::entries(&text)?, &files);
     let docs = measured(&top, &answer)?;
     let strays = strays(&top, &answer)?;
-    let held = baseline(&top)?;
-    let next = match &held {
-        Some(held) => held.clone(),
-        None => budget::ratchet(&docs, &strays, None),
+    let (next, adopted) = match baseline(&top)? {
+        Some(held) => (held, false),
+        None => {
+            let next = budget::ratchet(&docs, &strays, None);
+            write(&top.join(BASELINE), &(pretty(&json!(next)) + "\n"))?;
+            (next, true)
+        }
     };
-    let wrote_baseline = held.as_ref() != Some(&next);
-    if wrote_baseline {
-        write(&top.join(BASELINE), &(pretty(&json!(next)) + "\n"))?;
-    }
     let wrote_config = config.as_deref() != Some(text.as_str());
     if wrote_config {
         write(&top.join(CONFIG), &text)?;
     }
     let rehome: Vec<Value> = strays
         .iter()
-        .filter(|s| held.is_none() && matches!(next.get(s.file), Some(Held::Rehome(_))))
+        .filter(|_| adopted)
         .map(|s| json!({ "file": s.file, "size": s.bytes, "kinds": s.fault["kinds"], "fix": s.fault["fix"] }))
         .collect();
-    let mut faults: Vec<Value> = faults(&answer).collect();
-    faults.extend(budget::check(&docs, &strays, Some(&next)));
-    faults.sort_by(|a, b| a["file"].as_str().cmp(&b["file"].as_str()));
-    let changed = wrote_baseline || wrote_config;
+    let faults = faults(&answer, &docs, &strays, Some(&next));
+    let changed = adopted || wrote_config;
     let then = match faults.first() {
         Some(first) => first["fix"].clone(),
         None if changed => json!(format!(
