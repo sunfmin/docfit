@@ -1,0 +1,27 @@
+{
+  "tree": "a437dfa02b30de7559ab97a3d13003bb2701d228+d1fba762150c532c",
+  "picker": "codex:01a21364-8027-7be2-8b9c-1671df21fce8:default",
+  "author": "claude-code:6a700691-c534-5f82-b2d4-74eacb52a061:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/refs.rs:47:53: replace || with && in find",
+        "why": "The scanner cases check refs inside URLs but leave a ref after a separate URL on the same line untested.",
+        "outcome": "killed",
+        "first_outcome": "survived"
+      },
+      {
+        "name": "src/refs.rs:125:18: replace > with >= in ratchet",
+        "why": "The ratchet tests cover shrinking and dropping a hold, leaving open whether an unheld file with refs gets a zero-count entry.",
+        "outcome": "killed",
+        "first_outcome": "survived"
+      },
+      {
+        "name": "src/refs.rs:134:40: replace > with >= in adopted",
+        "why": "The adoption test starts from an empty baseline, so it misses a budget-only baseline incorrectly blocking adoption of refs.",
+        "outcome": "killed",
+        "first_outcome": "survived"
+      }
+    ]
+  }
+}
