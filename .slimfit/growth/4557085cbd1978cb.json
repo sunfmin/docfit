@@ -1,0 +1,10 @@
+{
+  "tree": "3029c46a0334f0c80ad8b9969c9f29acfbc74658+d1fba762150c532c",
+  "lines": 179,
+  "serves": "docfit#17",
+  "considered": "paragraph.rs issues() (docfit where's local_refs, which also takes a bare #N; kept apart since this check takes only listed names); budget's Hold/Rehome reused for the count rather than a new baseline entry; Seen's text reading in cli.rs",
+  "reviewer": "codex:01a21363-37ec-7201-bd63-9a6704161ba5:default",
+  "author": "claude-code:6a700691-c534-5f82-b2d4-74eacb52a061:opus",
+  "cut": "In src/cli.rs, remove `Registered` and `registered` and reuse `top` and `registered_at` directly in `check` and `ratchet`. In `init`, build the next baseline once from the existing baseline or `budget::ratchet`, then seed refs only when no count is held. In src/refs.rs, replace `after` and its byte-offset bookkeeping with `trim_end_matches` for the name and `rsplit` for the URL boundary. When the check is off, iterate the old baseline entries directly and reuse a count accessor in `check` and `adopted` to avoid looking each entry up again. In tests/refs.rs, fold the duplicate owner, URL, and name-boundary cases into the scanner tests in src/refs.rs, keeping one CLI case to verify the scanner is wired in.",
+  "answer": "Did each: Registered and registered removed, check and ratchet call registered_at and found; init clones or budget-ratchets the baseline once and seeds refs only when refs::adopted is false; after() removed for trim_end_matches and rsplit; the off branch iterates the held entries with a count(&Held) accessor that held() and adopted() share; the CLI owner/URL test keeps only the two acceptance cases (sunfmin/lore#25 and an …/issues/3 URL), the rest are in refs.rs's unit tests."
+}
