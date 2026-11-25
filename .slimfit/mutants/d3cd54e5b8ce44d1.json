@@ -1,0 +1,39 @@
+{
+  "tree": "f64e34f06653c7147e55a38cf366e32c63d0d323+d1fba762150c532c",
+  "picker": "codex:01a21371-1af7-7920-a6bc-fd6ab2560a52:default",
+  "author": "claude-code:9d5b8e3f-3766-55ae-80f0-931dd702e00c:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/restates.rs:129:29: replace < with <= in copies",
+        "why": "The tests cover overlapping windows and runs separated by a line, leaving adjacent runs with no matching window between them unchecked.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/paragraph.rs:204:24: replace + with * in split",
+        "why": "The `where` fixture starts its copy on the paragraph’s first line, so an end line that is one too low could survive.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/paragraph.rs:186:32: replace + with * in split",
+        "why": "The tests check whether a named fence is exempt but never check `where` placement for a copy starting on a closing fence line.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/restates.rs:162:24: replace += with *= in fences",
+        "why": "The named-fence fixtures use one block each, so they would miss a copied window spanning two blocks that now share an ID.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/restates.rs:166:30: replace + with * in fences",
+        "why": "Every tested fenced copy ends before the closing delimiter, so leaving that delimiter out of the block could survive.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}

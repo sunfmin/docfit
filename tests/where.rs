@@ -183,11 +183,11 @@ fn a_document_it_cannot_read_is_refused_with_its_fix() {
 
 #[test]
 fn catalogs_it_cannot_read_are_refused_with_their_fix() {
-    // `check` reads the same config: it refuses what is not one too.
-    for (catalogs, fix, check) in [
-        ("catalogs = \"App\"", "a list of globs", 2),
-        ("catalogs = [\"Nothing/*.xcstrings\"]", "matches no file", 0),
-        ("catalogs = [\"[\"]", "fix `[`", 2),
+    // `check` reads the catalogs too (`restates`): it refuses the same.
+    for (catalogs, fix) in [
+        ("catalogs = \"App\"", "a list of globs"),
+        ("catalogs = [\"Nothing/*.xcstrings\"]", "matches no file"),
+        ("catalogs = [\"[\"]", "fix `[`"),
     ] {
         let dir = fixture();
         let config = CONFIG.replace("catalogs = [\"App/**/*.xcstrings\"]", catalogs);
@@ -197,7 +197,11 @@ fn catalogs_it_cannot_read_are_refused_with_their_fix() {
         let all = answer["error"].to_string();
         assert!(all.contains(fix), "{catalogs}: {answer}");
         let (code, answer) = docfit(dir.path(), &["check"]);
-        assert_eq!(code, check, "{catalogs}: {answer}");
+        assert_eq!(code, 2, "{catalogs}: {answer}");
+        assert!(
+            answer["error"].to_string().contains(fix),
+            "{catalogs}: {answer}"
+        );
     }
 }
 

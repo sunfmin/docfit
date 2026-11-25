@@ -3,13 +3,16 @@
 //! text, what the repo holds of each candidate, and its ADRs arrive as
 //! arguments.
 
+use crate::restates::Restates;
 use serde::Serialize;
 use std::collections::BTreeSet;
 
-/// One paragraph: the line it starts on (from 1), its lines joined on
-/// spaces, and whether it is a fenced block, in which nothing is read.
+/// One paragraph: the lines it starts and ends on (from 1), its lines
+/// joined on spaces, and whether it is a fenced block, in which nothing is
+/// read.
 pub(crate) struct Paragraph {
     line: usize,
+    last: usize,
     text: String,
     fenced: bool,
 }
@@ -114,12 +117,12 @@ impl Adr {
 }
 
 /// What the repo holds of a document's candidates: the code spans that are
-/// a path git tracks, those found as a word outside Markdown, the quoted
-/// strings its catalogs hold, and its ADRs.
+/// a path git tracks, those found as a word outside Markdown, what the
+/// document restates (`restates::find`), and its ADRs.
 pub(crate) struct Known<'a> {
     pub(crate) paths: BTreeSet<String>,
     pub(crate) words: BTreeSet<String>,
-    pub(crate) strings: BTreeSet<String>,
+    pub(crate) restates: &'a Restates,
     pub(crate) adrs: &'a [Adr],
 }
 
@@ -152,6 +155,7 @@ pub(crate) struct Placed {
     text: String,
     code: Found,
     strings: Found,
+    copies: Found,
     evidence: Vec<String>,
     local_refs: Vec<String>,
     decision: Vec<&'static str>,
@@ -171,13 +175,15 @@ pub(crate) fn split(text: &str) -> Vec<Paragraph> {
         let t = line.trim();
         let starts = |fenced| Paragraph {
             line: i + 1,
+            last: i + 1,
             text: t.to_string(),
             fenced,
         };
         if let Some(fence) = ["```", "~~~"].into_iter().find(|f| t.starts_with(f)) {
             out.extend(open.take());
             let mut block = starts(true);
-            for (_, l) in lines.by_ref() {
+            for (j, l) in lines.by_ref() {
+                block.last = j + 1;
                 block.text.push('\n');
                 block.text.push_str(l);
                 if l.trim().starts_with(fence) {
@@ -195,6 +201,7 @@ pub(crate) fn split(text: &str) -> Vec<Paragraph> {
         } else if let Some(p) = open.as_mut().filter(|_| !item(t)) {
             p.text.push(' ');
             p.text.push_str(t);
+            p.last = i + 1;
         } else {
             out.extend(open.replace(starts(false)));
         }
@@ -229,13 +236,19 @@ fn item(t: &str) -> bool {
         || (n > 0 && [". ", ") "].iter().any(|m| t[n..].starts_with(m)))
 }
 
-/// Every code span that could be code, and every quoted string, in
-/// `paragraphs`: what the repo is asked about.
-pub(crate) fn candidates(paragraphs: &[Paragraph]) -> (BTreeSet<String>, BTreeSet<String>) {
+/// Every code span that could be code in `paragraphs`: what the repo is
+/// asked about.
+pub(crate) fn candidates(paragraphs: &[Paragraph]) -> BTreeSet<String> {
     let read = paragraphs.iter().filter(|p| !p.fenced);
-    let spans = read.clone().flat_map(|p| tokens(&p.text)).collect();
-    let strings = read.flat_map(|p| quoted(&prose(&p.text))).collect();
-    (spans, strings)
+    read.flat_map(|p| tokens(&p.text)).collect()
+}
+
+/// Every string quoted outside fenced code and code spans in `paragraphs`,
+/// in order, with the line its paragraph starts on.
+pub(crate) fn quotes(paragraphs: &[Paragraph]) -> Vec<(usize, String)> {
+    let read = paragraphs.iter().filter(|p| !p.fenced);
+    read.flat_map(|p| quoted(&prose(&p.text)).into_iter().map(|s| (p.line, s)))
+        .collect()
 }
 
 /// The `tokens` found as a whole word in `texts`, as `git grep -w` finds
@@ -283,7 +296,24 @@ pub(crate) fn place(p: &Paragraph, known: &Known) -> Placed {
     let code = Found::of(tokens(read), |t| {
         known.paths.contains(t) || known.words.contains(t)
     });
-    let strings = Found::of(quoted(&prose).into_iter(), |s| known.strings.contains(s));
+    let strings = Found::of(
+        known
+            .restates
+            .strings
+            .iter()
+            .filter(|s| s.line == p.line)
+            .map(|s| s.what.clone()),
+        |_| true,
+    );
+    let copies = Found::of(
+        known
+            .restates
+            .copies
+            .iter()
+            .filter(|c| p.line <= c.line && c.line <= p.last)
+            .map(|c| c.from.clone()),
+        |_| true,
+    );
     let (evidence, local_refs) = (measures(&prose), issues(&prose));
     let decision = decision(&prose);
     let pointer = pointer(read, &known.paths);
@@ -306,6 +336,7 @@ pub(crate) fn place(p: &Paragraph, known: &Known) -> Placed {
         text: excerpt(&p.text),
         code,
         strings,
+        copies,
         evidence,
         local_refs,
         decision,

@@ -1,0 +1,10 @@
+{
+  "tree": "4bc15bc43c75eab9b5216a4618a09ee14d6a2410+d1fba762150c532c",
+  "lines": 320,
+  "serves": "docfit#18",
+  "considered": "where's catalog filter in cli.rs (moved into restates::find, so where and check share it); refs.rs's ratchet and baseline-hold code (same shape, but over Held::Rehome too and one count, so kept apart); budget::ratchet (it builds holds afresh, so restatements are set after it as refs are)",
+  "reviewer": "codex:01a2136e-bb0a-7493-a98d-ece04a8fd7b6:default",
+  "author": "claude-code:9d5b8e3f-3766-55ae-80f0-931dd702e00c:opus",
+  "cut": "In src/restates.rs, store each indexed window’s source path and original line directly and drop the retained per-file line vectors. Fold matching windows into runs in one pass, preserving the current overlap rules and first-source selection. Share the per-measure baseline update loop between adopt and ratchet, keeping adoption’s guard. In src/cli.rs and src/restates.rs, pass the paragraphs already parsed by Seen::place to the shared detector so where parses each document once.",
+  "answer": "Made all four: Index maps each window to (path, line) with no per-file vectors; copies folds windows in one pass, joining a following window and skipping an overlapping one as before; adopt and ratchet both call Measure::ratchet; find takes the paragraphs, and where passes its own."
+}

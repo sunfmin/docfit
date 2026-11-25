@@ -55,6 +55,12 @@ pub(crate) struct Hold {
     /// The local tracker refs it is held at (`refs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) local_refs: Option<usize>,
+    /// The quoted catalog strings it is held at (`restates`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) strings: Option<usize>,
+    /// The runs copied from another file it is held at (`restates`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) copies: Option<usize>,
 }
 
 /// What the baseline holds a file at: a document over its budget, or a file
@@ -244,7 +250,7 @@ pub(crate) fn ratchet(
             ),
             line: None,
             pointers,
-            local_refs: None,
+            ..Hold::default()
         };
         if hold != Hold::default() {
             next.insert(doc.file.to_string(), Held::Over(hold));
