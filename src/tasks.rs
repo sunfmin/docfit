@@ -1,10 +1,49 @@
 //! Decides `docfit next`: the debt the baseline holds, as tasks. A file held
 //! to rehome that is still registered under no kind is a `rehome` task; a
 //! document held over its budget that is still over it is an `over-budget`
-//! task. Pure: the files measured and the baseline arrive as arguments.
+//! task; a file held at a count of local refs, restatements or measurements
+//! that still holds one is a task of that kind. Pure: the files measured,
+//! what is counted in them and the baseline arrive as arguments.
 
 use crate::budget::{Baseline, Held, Measured, Rehome, Size, Stray};
+use crate::restates::Restates;
+use crate::{measurements, refs};
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
+
+/// What a task pays, in the order `docfit next` answers them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Task {
+    Rehome,
+    OverBudget,
+    LocalRefs,
+    Restates,
+    Measurement,
+}
+
+impl Task {
+    /// Its `kind`, as `docfit next` answers it.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Task::Rehome => "rehome",
+            Task::OverBudget => "over-budget",
+            Task::LocalRefs => "local-refs",
+            Task::Restates => "restates",
+            Task::Measurement => "measurement",
+        }
+    }
+
+    /// What the baseline holds of `file` until the task is done.
+    pub(crate) fn held(self, file: &str) -> String {
+        match self {
+            Task::Rehome => format!("`{file}` to rehome"),
+            Task::OverBudget => format!("`{file}` over its budget"),
+            Task::LocalRefs => format!("`{file}`'s local refs"),
+            Task::Restates => format!("`{file}`'s restatements"),
+            Task::Measurement => format!("`{file}`'s measurements"),
+        }
+    }
+}
 
 /// One file of debt: its path, a line saying what it is, and what was
 /// measured of it (without what `docfit where` sees in it).
@@ -15,15 +54,19 @@ pub(crate) struct Debt<'a> {
     pub(crate) evidence: Value,
 }
 
-/// The debt `baseline` holds of `strays` and `docs`, by kind, in the order
-/// `docfit next` answers them: `rehome`, then `over-budget`, each in path
-/// order. A file it holds that is neither (gone, registered since, or back
-/// within its budget) is none: `docfit ratchet` drops it.
+/// The debt `baseline` holds of `strays` and `docs`, and of the local refs
+/// `refs` found, what `restated` restates and what `measured` measures, by
+/// kind, in [`Task`]'s order, each in path order. A file it holds that is
+/// none of these (gone, registered since, back within its budget, or its
+/// count down to 0) is none: `docfit ratchet` drops it.
 pub(crate) fn debt<'a>(
     docs: &[Measured<'a>],
     strays: &[Stray<'a>],
+    refs: Option<&'a refs::Found>,
+    restated: &BTreeMap<&'a str, Restates>,
+    measured: &measurements::Found<'a>,
     baseline: &Baseline,
-) -> [(&'static str, Vec<Debt<'a>>); 2] {
+) -> [(Task, Vec<Debt<'a>>); 5] {
     let mut rehome = Vec::new();
     for stray in strays {
         if let Some(Held::Rehome(Rehome { rehome: held, .. })) = baseline.get(stray.file) {
@@ -68,7 +111,16 @@ pub(crate) fn debt<'a>(
             evidence: json!({ "size": doc.size, "budget": doc.budget, "held": held }),
         });
     }
-    [("rehome", rehome), ("over-budget", over_budget)]
+    [
+        (Task::Rehome, rehome),
+        (Task::OverBudget, over_budget),
+        (
+            Task::LocalRefs,
+            refs.map_or_else(Vec::new, |f| refs::debt(f, baseline)),
+        ),
+        (Task::Restates, crate::restates::debt(restated, baseline)),
+        (Task::Measurement, measurements::debt(measured, baseline)),
+    ]
 }
 
 #[cfg(test)]
@@ -84,7 +136,18 @@ mod tests {
             bytes: 9,
             fault: &fault,
         }];
-        assert_eq!(debt(&[], &strays, &Baseline::new())[0].1, vec![]);
+        assert_eq!(
+            debt(
+                &[],
+                &strays,
+                None,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &Baseline::new()
+            )[0]
+            .1,
+            vec![]
+        );
         let mut baseline = Baseline::new();
         baseline.insert(
             "NEW.md".into(),
@@ -93,7 +156,19 @@ mod tests {
                 local_refs: None,
             }),
         );
-        assert_eq!(debt(&[], &strays, &baseline)[0].1[0].file, "NEW.md");
+        assert_eq!(
+            debt(
+                &[],
+                &strays,
+                None,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &baseline
+            )[0]
+            .1[0]
+                .file,
+            "NEW.md"
+        );
     }
 
     #[test]
@@ -123,7 +198,18 @@ mod tests {
                 ..Hold::default()
             }),
         );
-        assert_eq!(debt(&docs, &[], &baseline)[1].1, vec![]);
+        assert_eq!(
+            debt(
+                &docs,
+                &[],
+                None,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &baseline
+            )[1]
+            .1,
+            vec![]
+        );
         baseline.insert(
             "R.md".into(),
             Held::Over(Hold {
@@ -131,8 +217,15 @@ mod tests {
                 ..Hold::default()
             }),
         );
-        let [_, (kind, over)] = debt(&docs, &[], &baseline);
-        assert_eq!(kind, "over-budget");
+        let [_, (kind, over), ..] = debt(
+            &docs,
+            &[],
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &baseline,
+        );
+        assert_eq!(kind, Task::OverBudget);
         assert_eq!(
             over[0].summary,
             "`R.md` is its longest paragraph 9 characters, over 5, its budget: cut it to what its kind holds"

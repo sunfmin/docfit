@@ -7,19 +7,26 @@ use common::{docfit, isolated, repo};
 use serde_json::json;
 use std::process::Command;
 
-/// A repo adopted with `SPEC.md` held to rehome and `README.md` over its budget.
+const CODE: &str = "fn main() {\n    let answer = check(repo);\n    print(answer);\n}\n";
+
+/// A repo adopted with `SPEC.md` held to rehome, and `README.md` over its
+/// budget and held at one local ref, one copied run and one measurement.
 fn indebted() -> tempfile::TempDir {
     let readme = format!(
-        "# Readme\n\nThe answer is built by `Answer`.\n\n{}\n",
+        "# Readme\n\nThe answer is built by `Answer`, as proj#7 asked.\n\nThe gate runs in 2 min.\n\n{CODE}\n{}\n",
         "Words run on. ".repeat(400).trim_end()
     );
     let dir = repo(&[
+        (
+            "docfit.toml",
+            "local_issue_refs = [\"proj\"]\n[documents]\n\"README.md\" = \"readme\"\n",
+        ),
         ("README.md", &readme),
         (
             "SPEC.md",
             "# Spec\n\nWe chose globs instead of regexes because they read.\n",
         ),
-        ("src/a.rs", "struct Answer;\n"),
+        ("src/a.rs", &format!("struct Answer;\n{CODE}")),
     ]);
     assert_eq!(docfit(dir.path(), &["init"]).0, 0);
     dir
@@ -31,9 +38,12 @@ fn a_baseline_with_debt_answers_one_task_of_each_kind() {
     let (code, answer) = docfit(dir.path(), &["next", "--all"]);
     assert_eq!(code, 0, "{answer}");
     assert_eq!(answer["by"], format!("docfit {}", env!("DOCFIT_VERSION")));
-    assert_eq!(answer["counts"], json!({ "rehome": 1, "over-budget": 1 }));
+    assert_eq!(
+        answer["counts"],
+        json!({ "rehome": 1, "over-budget": 1, "local-refs": 1, "restates": 1, "measurement": 1 })
+    );
     let tasks = answer["tasks"].as_array().unwrap();
-    assert_eq!(tasks.len(), 2, "{answer}");
+    assert_eq!(tasks.len(), 5, "{answer}");
 
     let rehome = &tasks[0];
     assert_eq!(rehome["kind"], "rehome");
@@ -57,8 +67,50 @@ fn a_baseline_with_debt_answers_one_task_of_each_kind() {
     assert_eq!(over["evidence"]["where"]["paragraphs"][0]["home"], "delete");
 
     assert_eq!(rehome["steps"], over["steps"]);
+    for (task, kind) in tasks[2..]
+        .iter()
+        .zip(["local-refs", "restates", "measurement"])
+    {
+        assert_eq!(task["kind"], kind);
+        assert_eq!(task["files"], json!(["README.md"]));
+        let steps = task["steps"].as_str().unwrap();
+        assert!(help(dir.path(), kind).contains(steps), "{kind}: {steps}");
+        let accept = task["accept"].as_str().unwrap();
+        assert!(
+            accept.contains("docfit ratchet") && accept.contains("`README.md`"),
+            "{accept}"
+        );
+        assert!(task["evidence"]["where"].is_null(), "{task}");
+    }
+    assert_eq!(
+        tasks[2]["evidence"],
+        json!({ "refs": [{ "line": 3, "ref": "proj#7" }], "held": 1 })
+    );
+    assert_eq!(
+        tasks[3]["evidence"],
+        json!({
+            "strings": [],
+            "copies": [{ "line": 7, "end": 10, "found": "fn main() {", "from": "src/a.rs:2" }],
+            "held": { "strings": 0, "copies": 1 },
+        })
+    );
+    assert_eq!(
+        tasks[4]["evidence"],
+        json!({ "measurements": [{ "line": 5, "found": "2 min" }], "held": 1 })
+    );
+    let steps = tasks[2]["steps"].as_str().unwrap();
+    assert!(steps.contains("factorium issue show"), "{steps}");
     let (_, first) = docfit(dir.path(), &["next"]);
     assert_eq!(first["task"], *rehome);
+}
+
+/// What `docfit help <topic>` prints.
+fn help(dir: &std::path::Path, topic: &str) -> String {
+    let out = isolated(Command::new(env!("CARGO_BIN_EXE_docfit")), dir)
+        .args(["help", topic])
+        .output()
+        .unwrap();
+    String::from_utf8(out.stdout).unwrap()
 }
 
 #[test]
@@ -66,11 +118,7 @@ fn the_steps_are_the_text_help_rehome_prints_and_put_the_map_in_the_commit() {
     let dir = indebted();
     let (_, answer) = docfit(dir.path(), &["next", "--all"]);
     let steps = answer["tasks"][0]["steps"].as_str().unwrap();
-    let out = isolated(Command::new(env!("CARGO_BIN_EXE_docfit")), dir.path())
-        .args(["help", "rehome"])
-        .output()
-        .unwrap();
-    let help = String::from_utf8(out.stdout).unwrap();
+    let help = help(dir.path(), "rehome");
     assert!(help.contains(steps), "{help}\n---\n{steps}");
     assert!(steps.contains("The commit that removes the content carries the map in its message"));
     assert!(steps.contains("never in a file of the repo"));
@@ -86,7 +134,10 @@ fn a_task_paid_and_ratcheted_is_gone() {
     let (code, answer) = docfit(dir.path(), &["next", "--all"]);
     assert_eq!(code, 0);
     assert_eq!(answer["tasks"], json!([]));
-    assert_eq!(answer["counts"], json!({ "rehome": 0, "over-budget": 0 }));
+    assert_eq!(
+        answer["counts"],
+        json!({ "rehome": 0, "over-budget": 0, "local-refs": 0, "restates": 0, "measurement": 0 })
+    );
 }
 
 #[test]

@@ -7,6 +7,7 @@
 
 use crate::budget::{self, Baseline, Slot};
 use crate::paragraph::{self, Paragraph};
+use crate::tasks::Debt;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 
@@ -252,6 +253,48 @@ pub(crate) fn check(found: &BTreeMap<&str, Restates>, baseline: Option<&Baseline
         }
     }
     faults
+}
+
+/// The `restates` debt: each document of `found` with a measure whose count
+/// `baseline` holds that it still restates, with every restatement.
+pub(crate) fn debt<'a>(found: &BTreeMap<&'a str, Restates>, baseline: &Baseline) -> Vec<Debt<'a>> {
+    let mut out = Vec::new();
+    for (file, restates) in found {
+        let held = Measure::ALL.map(|m| budget::held(baseline, file, m.slot()));
+        if !Measure::ALL
+            .iter()
+            .zip(held)
+            .any(|(m, held)| held > 0 && !m.of(restates).is_empty())
+        {
+            continue;
+        }
+        let mut evidence = json!({});
+        let mut counts = Vec::new();
+        for (m, held) in Measure::ALL.iter().zip(held) {
+            let each: Vec<Value> = m
+                .of(restates)
+                .iter()
+                .map(|r| match m {
+                    Measure::Strings => json!({ "line": r.line, "found": r.what, "from": r.from }),
+                    Measure::Copies => {
+                        json!({ "line": r.line, "end": r.end, "found": r.what, "from": r.from })
+                    }
+                })
+                .collect();
+            counts.push(format!("{} {}", each.len(), m.name()));
+            evidence[m.name()] = json!(each);
+            evidence["held"][m.name()] = json!(held);
+        }
+        out.push(Debt {
+            file,
+            summary: format!(
+                "`{file}` restates what the repo already says ({}): point at the one place, and delete the copy",
+                counts.join(", ")
+            ),
+            evidence,
+        });
+    }
+    out
 }
 
 /// `next` (the baseline the budgets ratchet to) holding each document's

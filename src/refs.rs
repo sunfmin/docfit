@@ -4,6 +4,7 @@
 //! files' texts, the names and the baseline arrive as arguments.
 
 use crate::budget::{Baseline, Held, Hold};
+use crate::tasks::Debt;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -126,6 +127,31 @@ pub(crate) fn ratchet(found: Option<&Found>, held: Option<&Baseline>, next: &mut
             hold(next, file, count);
         }
     }
+}
+
+/// The `local-refs` debt: each file of `found` whose refs `baseline` holds,
+/// with every ref and its line.
+pub(crate) fn debt<'a>(found: &'a Found, baseline: &Baseline) -> Vec<Debt<'a>> {
+    let mut out = Vec::new();
+    for (file, refs) in found {
+        let held = held(baseline, file);
+        if held == 0 {
+            continue;
+        }
+        let each: Vec<Value> = refs
+            .iter()
+            .map(|r| json!({ "line": r.line, "ref": r.text }))
+            .collect();
+        out.push(Debt {
+            file,
+            summary: format!(
+                "`{file}` cites the local tracker {} times, held at {held}: replace each ref with what it points at, or delete it",
+                refs.len()
+            ),
+            evidence: json!({ "refs": each, "held": held }),
+        });
+    }
+    out
 }
 
 /// Whether `baseline` holds any file's refs: a repo whose baseline holds none

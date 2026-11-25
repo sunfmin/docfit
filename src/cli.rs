@@ -10,7 +10,7 @@ use crate::pointers::{self, Tree};
 use crate::refs::{self, Found};
 use crate::repo;
 use crate::restates::{self, Index, Restates, Text};
-use crate::tasks;
+use crate::tasks::{self, Task};
 use agent_help::{Help, Topic};
 use clap::{FromArgMatches, Parser, Subcommand};
 use serde_json::{Value, json};
@@ -309,7 +309,7 @@ enum Cmd {
         #[arg(verbatim_doc_comment)]
         file: PathBuf,
     },
-    /// Lists the repo's document debt as tasks: each file the baseline holds to rehome, and each document it holds over its budget, with the steps that pay it.
+    /// Lists the repo's document debt as tasks: each file the baseline holds to rehome, each document it holds over its budget, and each file it holds at a count of local refs, restatements or measurements, with the steps that pay it.
     ///
     /// ## When to run it
     ///
@@ -325,13 +325,13 @@ enum Cmd {
     ///
     /// - `by`: the docfit that read them, `docfit <version>`.
     /// - `counts`: how many tasks of each kind there are.
-    /// - `tasks`, with `--all`: every task, rehome first, then over-budget, each in path order; without it, `task`: the first, or null. Each has:
-    ///   - `kind`: `rehome`, a file the baseline holds to rehome that is still registered under no kind; or `over-budget`, a document the baseline holds over its budget that is still over it.
+    /// - `tasks`, with `--all`: every task, by kind in the order below, each in path order; without it, `task`: the first, or null. Each has:
+    ///   - `kind`: `rehome`, a file the baseline holds to rehome that is still registered under no kind; `over-budget`, a document the baseline holds over its budget that is still over it; `local-refs`, a file the baseline holds at a count of local tracker refs that still cites one; `restates`, a document it holds at a count of catalog strings or copied runs that still restates one; or `measurement`, a document it holds at a count of measurements that still holds one (`docfit check --help`). A file with several of these is a task of each.
     ///   - `summary`: the file, and what it is.
     ///   - `files`: the one file, from the repo's top.
-    ///   - `steps`: how to move its content to its homes; the text `docfit help rehome` prints.
-    ///   - `accept`: what holds it done: after `docfit ratchet`, `docfit check` exits {const:EXIT_OK} and `{const:BASELINE}` no longer holds the file (gone, registered under a kind, or within its budget).
-    ///   - `evidence`: `size` (a file's bytes; a document's `bytes` and `paragraph`), `held` (what the baseline holds it at), for a document its `budget`, and `where`: `docfit where`'s answer on the file.
+    ///   - `steps`: how to pay it; the text `docfit help <kind>` prints, `docfit help rehome` for `rehome` and `over-budget`.
+    ///   - `accept`: what holds it done: after `docfit ratchet`, `docfit check` exits {const:EXIT_OK} and `{const:BASELINE}` no longer holds the file in what the task pays (to rehome: gone or registered under a kind; over its budget: within it; a count: down to 0).
+    ///   - `evidence`: `held`, what the baseline holds it at, and what is found in it now: for `rehome` and `over-budget`, `size` (a file's bytes; a document's `bytes` and `paragraph`), for a document its `budget`, and `where`, `docfit where`'s answer on the file; for `local-refs`, `refs`, each `{"line", "ref"}`; for `restates`, `strings` (each `{"line", "found", "from"}`) and `copies` (each also with `end`), `held` a count of each; for `measurement`, `measurements`, each `{"line", "found"}`, `line` where its paragraph starts.
     /// - `notes`: what was not looked for; without a baseline nothing is held, so there is no task.
     /// - `next`: do the first task by its steps, or that there is nothing to do.
     ///
@@ -340,7 +340,7 @@ enum Cmd {
     /// ```json
     /// {
     ///   "by": "docfit 0.1.0",
-    ///   "counts": { "rehome": 1, "over-budget": 0 },
+    ///   "counts": { "rehome": 1, "over-budget": 0, "local-refs": 0, "restates": 0, "measurement": 0 },
     ///   "tasks": [
     ///     { "kind": "rehome", "summary": "`SPEC.md` (15360 bytes) is registered under no kind, held to rehome: move its content to its homes", "files": ["SPEC.md"], "steps": "…", "accept": "…", "evidence": { "size": 15360, "held": 15360, "where": { "file": "SPEC.md", "kind": null, "paragraphs": ["…"] } } }
     ///   ],
@@ -357,7 +357,7 @@ enum Cmd {
     ///
     /// ## What trips you up
     ///
-    /// - A file the baseline holds that is gone, registered since, or back within its budget is no task: `docfit check`'s `next` says to run `docfit ratchet`, which drops it.
+    /// - A file the baseline holds that is gone, registered since, back within its budget, or down to no ref, restatement or measurement is no task: `docfit check`'s `next` says to run `docfit ratchet`, which drops it.
     /// - A file is a task until `docfit ratchet` drops it from the baseline: cutting it is not enough, commit the baseline with the change.
     #[command(
         next_help_heading = "Run by the agent, and by factorium's idle work",
@@ -382,7 +382,7 @@ enum Cmd {
     },
 }
 
-/// How to move a document's content to its homes, and so pay a `docfit next` task: a file held to rehome, or a document over its budget. These are the steps of every task `docfit next` answers.
+/// How to move a document's content to its homes, and so pay a `docfit next` task: a file held to rehome, or a document over its budget. These are the steps of its `rehome` and `over-budget` tasks.
 ///
 /// 1. Run `docfit where <file>` and go through its paragraphs one by one. Each `home` is a suggestion; the features beside it are there to judge it by.
 /// 2. Put each paragraph in its home:
@@ -394,14 +394,42 @@ enum Cmd {
 ///    - A promise: an ADR; where the repo has truefit, register it there too.
 ///    - Anything else (`judge`): move it to the document whose kind holds it (`docfit --help`), or delete it.
 /// 3. The commit that removes the content carries the map in its message: for each paragraph, its first words, then its home, which is one of: `file:line` where it now is; the ADR; the code symbol, catalog key or screen test that already says it; or "nowhere, because <it restated X>". So whoever finds the removed text in `git log` reads the map in the same commit. The map lives only in that commit message, never in a file of the repo: it is the signpost of one move, and the content's new homes are found without it. Like everything the repo keeps, it cites no issue of the local tracker.
-/// 4. Run `docfit ratchet`, then `docfit check`, and commit the baseline with the change: the task is done once the baseline no longer holds the file.
+/// 4. Run `docfit ratchet`, then `docfit check`, and commit the baseline with the change: the task is done once the baseline no longer holds the file to rehome or over its budget.
 #[derive(Topic)]
 #[topic(name = "rehome")]
 struct RehomeTopic;
 
+/// How to take a file's local tracker refs out, and so pay a `local-refs` task of `docfit next`.
+///
+/// 1. For each ref in the task's `evidence` (`refs`, each with its `line`), read the issue it names: `factorium issue show <ref>`.
+/// 2. Replace the ref with what the reader needed from it: the person's words, with who, date and where; or the command and the number it printed. Or delete the ref, if what is around it reads alone without it.
+/// 3. Run `docfit ratchet`, then `docfit check`, and commit the baseline with the change: the task is done once the baseline no longer holds the file's local refs.
+#[derive(Topic)]
+#[topic(name = "local-refs")]
+struct LocalRefsTopic;
+
+/// How to take what a document restates out of it, and so pay a `restates` task of `docfit next`.
+///
+/// 1. For each restatement in the task's `evidence` (a catalog string in `strings`, a run copied from another file in `copies`, each with its `line` and `from`, where the repo already says it): point at the key, the test or the one place, and delete the copy.
+/// 2. Run `docfit ratchet`, then `docfit check`, and commit the baseline with the change: the task is done once the baseline no longer holds the document's restatements.
+#[derive(Topic)]
+#[topic(name = "restates")]
+struct RestatesTopic;
+
+/// How to take the measured numbers out of a document, and so pay a `measurement` task of `docfit next`.
+///
+/// 1. For each number in the task's `evidence` (`measurements`, each with the `line` its paragraph starts on): move it to the ADR of the decision it supports, with the command that measures it; or delete it.
+/// 2. Run `docfit ratchet`, then `docfit check`, and commit the baseline with the change: the task is done once the baseline no longer holds the document's measurements.
+#[derive(Topic)]
+#[topic(name = "measurement")]
+struct MeasurementTopic;
+
 pub(crate) fn help() -> Help {
     Help::new(<Cli as clap::CommandFactory>::command())
         .topic::<RehomeTopic>()
+        .topic::<LocalRefsTopic>()
+        .topic::<RestatesTopic>()
+        .topic::<MeasurementTopic>()
         .constant("KINDS", Kind::table())
         .constant("HOMES", Home::table())
         .constant("BASELINE", BASELINE)
@@ -847,27 +875,44 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
             )],
         ),
     };
-    let steps = RehomeTopic::MARKDOWN;
+    let counted = seen.read.counted(&seen.answer);
+    let debt = tasks::debt(
+        &docs,
+        &strays,
+        counted.refs,
+        &counted.restated,
+        &counted.measured,
+        &held,
+    );
     let (mut tasks, mut counts) = (Vec::new(), serde_json::Map::new());
-    for (kind, debts) in tasks::debt(&docs, &strays, &held) {
-        counts.insert(kind.to_string(), json!(debts.len()));
+    for (task, debts) in debt {
+        counts.insert(task.name().to_string(), json!(debts.len()));
+        // The rehome steps start from `docfit where`, so its answer is evidence.
+        let (steps, place) = match task {
+            Task::Rehome | Task::OverBudget => (RehomeTopic::MARKDOWN, true),
+            Task::LocalRefs => (LocalRefsTopic::MARKDOWN, false),
+            Task::Restates => (RestatesTopic::MARKDOWN, false),
+            Task::Measurement => (MeasurementTopic::MARKDOWN, false),
+        };
         for debt in debts {
-            let text = tracked_text(&top, debt.file).map_err(|r| vec![r])?;
             let mut evidence = debt.evidence;
-            evidence["where"] = seen.place(debt.file, &text);
+            if place {
+                let text = tracked_text(&top, debt.file).map_err(|r| vec![r])?;
+                evidence["where"] = seen.place(debt.file, &text);
+            }
             tasks.push(json!({
-                "kind": kind, "summary": debt.summary, "files": [debt.file],
+                "kind": task.name(), "summary": debt.summary, "files": [debt.file],
                 "steps": steps,
                 "accept": format!(
-                    "`docfit ratchet`, then `docfit check` exits {EXIT_OK} and {BASELINE} no longer holds `{}`",
-                    debt.file
+                    "`docfit ratchet`, then `docfit check` exits {EXIT_OK} and {BASELINE} no longer holds {}",
+                    task.held(debt.file)
                 ),
                 "evidence": evidence,
             }));
         }
     }
     let then = if tasks.is_empty() {
-        "nothing to do: the baseline holds no document over its budget and no file to rehome"
+        "nothing to do: the baseline holds no debt that is still there"
     } else {
         "do the first task by its steps, then its accept, and commit; then `docfit next` again"
     };
