@@ -488,25 +488,6 @@ fn found(config: &Config, kept: &[Text]) -> Option<Found> {
     Some(found)
 }
 
-/// What each document `answer` registers restates, read from `kept`, the
-/// text files `docfit.toml` does not ignore, against those and `catalogs`.
-fn restated<'a>(
-    answer: &Answer,
-    kept: &'a [Text],
-    catalogs: &[Text],
-) -> BTreeMap<&'a str, Restates> {
-    let index = Index::new(kept);
-    kept.iter()
-        .filter(|t| answer.documents.contains_key(&t.path))
-        .map(|t| {
-            (
-                t.path.as_str(),
-                restates::find(&t.path, &t.text, catalogs, &index),
-            )
-        })
-        .collect()
-}
-
 /// What `docfit check`, `ratchet` and `init` read of a repo beyond its
 /// documents: its text files `docfit.toml` does not ignore, the local refs in
 /// them, and its string catalogs.
@@ -526,8 +507,22 @@ impl Read {
         })
     }
 
+    /// What each document `answer` registers restates, against the other
+    /// text files and the catalogs.
     fn restated(&self, answer: &Answer) -> BTreeMap<&str, Restates> {
-        restated(answer, &self.kept, &self.catalogs)
+        let index = Index::new(&self.kept);
+        let documents = self
+            .kept
+            .iter()
+            .filter(|t| answer.documents.contains_key(&t.path));
+        documents
+            .map(|t| {
+                (
+                    t.path.as_str(),
+                    restates::find(&t.path, &t.text, &self.catalogs, &index),
+                )
+            })
+            .collect()
     }
 }
 
