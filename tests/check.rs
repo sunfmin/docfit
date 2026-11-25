@@ -215,3 +215,17 @@ fn a_file_whose_name_says_its_kind_is_offered_that_kind() {
         ])
     );
 }
+
+#[test]
+fn without_git_on_path_it_is_refused_with_its_fix() {
+    let dir = repo(&[("docfit.toml", README_ONLY), ("README.md", "r\n")]);
+    let mut command = isolated(Command::new(env!("CARGO_BIN_EXE_docfit")), dir.path());
+    let out = command
+        .arg("check")
+        .env("PATH", dir.path().join("no-bin"))
+        .output()
+        .unwrap();
+    let answer: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(out.status.code(), Some(2), "{answer}");
+    assert_eq!(answer["error"][0]["fix"], "install git, on PATH");
+}

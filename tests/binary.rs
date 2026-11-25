@@ -64,3 +64,13 @@ fn an_unknown_topic_is_refused_with_its_fix() {
         "run `docfit --help` for the topics"
     );
 }
+
+#[test]
+fn help_answers_the_index_and_help_all_the_whole_manual() {
+    let index = docfit(&["--help"]);
+    assert_eq!(docfit(&["help"]), index);
+    let (code, all) = docfit(&["help", "all"]);
+    assert_eq!(code, 0);
+    assert!(all.contains("## When to run it"), "{all}");
+    assert!(!index.1.contains("## When to run it"), "{}", index.1);
+}

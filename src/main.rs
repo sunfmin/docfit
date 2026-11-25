@@ -10,6 +10,6 @@ agent_help::binary!("docfit");
 
 fn main() {
     let (answer, code) = cli::run(std::env::args_os());
-    println!("{answer}");
+    println!("{}", answer.trim_end());
     std::process::exit(code);
 }
