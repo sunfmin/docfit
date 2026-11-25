@@ -2,6 +2,9 @@
 //! `docfit --help` is the manual and its only copy.
 
 mod cli;
+mod documents;
+mod kind;
+mod repo;
 
 agent_help::binary!("docfit");
 
