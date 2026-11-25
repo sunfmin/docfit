@@ -251,14 +251,34 @@ fn registered(repo: Option<PathBuf>) -> Result<(PathBuf, Answer), Vec<Refusal>> 
     Ok((top, answer))
 }
 
-/// Each of `docs`, a registered document, with its text read from the
-/// working tree.
+/// The registered documents named in `files` (every one, when it names
+/// none), each with its text read from the working tree.
 fn read<'a>(
     top: &Path,
-    docs: impl Iterator<Item = (&'a String, &'a Document)>,
+    answer: &'a Answer,
+    files: &[String],
 ) -> Result<Vec<(&'a str, Document, String)>, Vec<Refusal>> {
-    let (mut texts, mut refusals) = (Vec::new(), Vec::new());
-    for (file, doc) in docs {
+    let mut refusals: Vec<Refusal> = files
+        .iter()
+        .filter(|f| !answer.documents.contains_key(*f))
+        .map(|f| {
+            refusal(
+                &format!("`{f}` is not a registered document"),
+                &format!(
+                    "name it from the repo's top as `docfit check` lists it under `documents`, or register it in {CONFIG}"
+                ),
+            )
+        })
+        .collect();
+    if !refusals.is_empty() {
+        return Err(refusals);
+    }
+    let mut texts = Vec::new();
+    let named = answer
+        .documents
+        .iter()
+        .filter(|(f, _)| files.is_empty() || files.contains(f));
+    for (file, doc) in named {
         match std::fs::read_to_string(top.join(file)) {
             Ok(text) => texts.push((file.as_str(), *doc, text)),
             Err(e) => refusals.push(refusal(
@@ -309,13 +329,13 @@ fn baseline(top: &Path) -> Result<Option<Baseline>, Vec<Refusal>> {
 
 fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let (top, answer) = registered(repo)?;
-    let texts = read(&top, answer.documents.iter())?;
+    let texts = read(&top, &answer, &[])?;
     let docs = measured(&texts);
     let held = baseline(&top)?;
     let mut faults = answer.faults.clone();
     faults.extend(budget::check(&docs, held.as_ref()));
     for (file, _, text) in &texts {
-        if let Some(line) = sentences::first_unformatted(text) {
+        if let (_, Some(line)) = sentences::format(text) {
             faults.push(json!({
                 "file": file, "fault": "unformatted", "line": line,
                 "fix": format!("run `docfit fmt {file}`: it breaks its prose at its sentences, one per line"),
@@ -354,7 +374,7 @@ fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
 
 fn ratchet(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let (top, answer) = registered(repo)?;
-    let texts = read(&top, answer.documents.iter())?;
+    let texts = read(&top, &answer, &[])?;
     let docs = measured(&texts);
     let held = baseline(&top)?;
     let next = budget::ratchet(&docs, held.as_ref());
@@ -375,29 +395,9 @@ fn ratchet(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
 
 fn fmt(repo: Option<PathBuf>, files: Vec<String>) -> Result<(String, i32), Vec<Refusal>> {
     let (top, answer) = registered(repo)?;
-    let unregistered: Vec<Refusal> = files
-        .iter()
-        .filter(|f| !answer.documents.contains_key(*f))
-        .map(|f| {
-            refusal(
-                &format!("`{f}` is not a registered document"),
-                &format!(
-                    "name it from the repo's top as `docfit check` lists it under `documents`, or register it in {CONFIG}"
-                ),
-            )
-        })
-        .collect();
-    if !unregistered.is_empty() {
-        return Err(unregistered);
-    }
-    let docs = answer
-        .documents
-        .iter()
-        .filter(|(f, _)| files.is_empty() || files.contains(f));
     let mut formatted = Vec::new();
-    for (file, _, text) in read(&top, docs)? {
-        let new = sentences::format(&text);
-        if new != text {
+    for (file, _, text) in read(&top, &answer, &files)? {
+        if let (new, Some(_)) = sentences::format(&text) {
             write(&top.join(file), &new)?;
             formatted.push(file);
         }
@@ -423,11 +423,8 @@ fn write(path: &Path, text: &str) -> Result<(), Vec<Refusal>> {
     };
     let dir = path.parent().expect("a file is in a directory");
     std::fs::create_dir_all(dir).map_err(failed)?;
-    let name = path
-        .file_name()
-        .expect("a file has a name")
-        .to_string_lossy();
-    let temp = path.with_file_name(format!("{name}.tmp"));
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(".tmp");
     std::fs::write(&temp, text).map_err(failed)?;
     std::fs::rename(&temp, path).map_err(failed)
 }

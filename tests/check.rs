@@ -37,14 +37,10 @@ fn isolated(mut command: Command, dir: &Path) -> Command {
 }
 
 fn check(dir: &Path) -> (i32, Value) {
-    docfit(dir, "check")
+    docfit(dir, &["check"])
 }
 
-fn docfit(dir: &Path, command: &str) -> (i32, Value) {
-    run(dir, &[command])
-}
-
-fn run(dir: &Path, args: &[&str]) -> (i32, Value) {
+fn docfit(dir: &Path, args: &[&str]) -> (i32, Value) {
     let out = isolated(Command::new(env!("CARGO_BIN_EXE_docfit")), dir)
         .args(args)
         .output()
@@ -292,7 +288,7 @@ fn the_kinds_default_budget_holds_where_no_entry_sets_one() {
 #[test]
 fn over_budget_but_within_the_baseline_is_green_and_growth_past_it_red() {
     let dir = repo(&[("docfit.toml", BIG), ("README.md", "ab\nabcdefg\n")]);
-    let (code, answer) = docfit(dir.path(), "ratchet");
+    let (code, answer) = docfit(dir.path(), &["ratchet"]);
     assert_eq!(code, 0, "{answer}");
     assert_eq!(answer["changed"], true);
     let held = serde_json::json!({ "README.md": { "bytes": 11, "line": 7 } });
@@ -334,7 +330,7 @@ fn ratchet_never_raises_a_number() {
         ("README.md", "abcdefghijkl\n"),
         ("A.md", "a\n"),
     ]);
-    docfit(dir.path(), "ratchet");
+    docfit(dir.path(), &["ratchet"]);
     assert_eq!(
         baseline(dir.path()),
         serde_json::json!({ "README.md": { "bytes": 13, "line": 12 } })
@@ -343,7 +339,7 @@ fn ratchet_never_raises_a_number() {
     // Grown, and a new document over its budget: neither raises the baseline.
     std::fs::write(dir.path().join("README.md"), "abcdefghijklmn\n").unwrap();
     std::fs::write(dir.path().join("A.md"), "abcdefghijklmn\n").unwrap();
-    let (code, answer) = docfit(dir.path(), "ratchet");
+    let (code, answer) = docfit(dir.path(), &["ratchet"]);
     assert_eq!((code, &answer["changed"]), (0, &false.into()), "{answer}");
     assert_eq!(
         baseline(dir.path()),
@@ -363,7 +359,7 @@ fn ratchet_never_raises_a_number() {
             .starts_with("run `docfit ratchet`"),
         "{answer}"
     );
-    let (_, answer) = docfit(dir.path(), "ratchet");
+    let (_, answer) = docfit(dir.path(), &["ratchet"]);
     assert_eq!(answer["changed"], true, "{answer}");
     assert_eq!(
         baseline(dir.path()),
@@ -381,10 +377,10 @@ fn ratchet_never_raises_a_number() {
 
     // Within budget whole: the baseline is empty, and stays.
     std::fs::write(dir.path().join("README.md"), "ab\n").unwrap();
-    docfit(dir.path(), "ratchet");
+    docfit(dir.path(), &["ratchet"]);
     assert_eq!(baseline(dir.path()), serde_json::json!({}));
     std::fs::write(dir.path().join("README.md"), "abcdefghijklmn\n").unwrap();
-    docfit(dir.path(), "ratchet");
+    docfit(dir.path(), &["ratchet"]);
     assert_eq!(baseline(dir.path()), serde_json::json!({}));
 }
 
@@ -407,7 +403,7 @@ fn a_baseline_or_document_it_cannot_read_is_refused() {
     )
     .unwrap();
     for command in ["check", "ratchet"] {
-        let (code, answer) = docfit(dir.path(), command);
+        let (code, answer) = docfit(dir.path(), &[command]);
         assert_eq!(code, 2, "{answer}");
         assert!(
             answer["error"][0]["fix"]
@@ -434,7 +430,7 @@ fn a_baseline_it_cannot_read_or_write_is_refused() {
     let held = dir.path().join(".docfit");
     std::fs::create_dir(&held).unwrap();
     std::fs::set_permissions(&held, std::fs::Permissions::from_mode(0o555)).unwrap();
-    let (code, answer) = docfit(dir.path(), "ratchet");
+    let (code, answer) = docfit(dir.path(), &["ratchet"]);
     assert_eq!(code, 2, "{answer}");
     assert!(
         answer["error"][0]["fix"]
@@ -467,10 +463,10 @@ fn at_its_budget_exactly_is_within_it() {
             .contains("(it is 16): "),
         "{answer}"
     );
-    docfit(dir.path(), "ratchet");
+    docfit(dir.path(), &["ratchet"]);
     // Shrunk to its byte budget exactly: that measure leaves the baseline.
     std::fs::write(dir.path().join("README.md"), "abcdefg\nb\n").unwrap();
-    docfit(dir.path(), "ratchet");
+    docfit(dir.path(), &["ratchet"]);
     assert_eq!(
         baseline(dir.path()),
         serde_json::json!({ "README.md": { "line": 7 } })
@@ -491,7 +487,7 @@ fn an_unformatted_document_is_red_until_fmt_breaks_it_at_its_sentences() {
             "fix": "run `docfit fmt README.md`: it breaks its prose at its sentences, one per line",
         }])
     );
-    let (code, answer) = run(dir.path(), &["fmt", "README.md"]);
+    let (code, answer) = docfit(dir.path(), &["fmt", "README.md"]);
     assert_eq!(code, 0, "{answer}");
     assert_eq!(answer["changed"], true);
     assert_eq!(answer["formatted"], serde_json::json!(["README.md"]));
@@ -511,9 +507,9 @@ fn an_unformatted_document_is_red_until_fmt_breaks_it_at_its_sentences() {
 #[test]
 fn a_second_fmt_changes_nothing() {
     let dir = repo(&[("docfit.toml", README_ONLY), ("README.md", PROSE)]);
-    run(dir.path(), &["fmt"]);
+    docfit(dir.path(), &["fmt"]);
     let once = std::fs::read_to_string(dir.path().join("README.md")).unwrap();
-    let (code, answer) = run(dir.path(), &["fmt"]);
+    let (code, answer) = docfit(dir.path(), &["fmt"]);
     assert_eq!(code, 0, "{answer}");
     assert_eq!(answer["changed"], false);
     assert_eq!(answer["formatted"], serde_json::json!([]));
@@ -531,7 +527,7 @@ fn fmt_leaves_a_file_that_is_no_registered_document_alone() {
         ("README.md", "A. B.\n"),
         ("notes.md", "C. D.\n"),
     ]);
-    let (code, answer) = run(dir.path(), &["fmt"]);
+    let (code, answer) = docfit(dir.path(), &["fmt"]);
     assert_eq!(code, 0, "{answer}");
     assert_eq!(answer["formatted"], serde_json::json!(["README.md"]));
     assert_eq!(
@@ -547,7 +543,7 @@ fn fmt_naming_a_file_that_is_no_registered_document_is_refused_and_writes_nothin
         ("README.md", "A. B.\n"),
         ("notes.md", "C. D.\n"),
     ]);
-    let (code, answer) = run(dir.path(), &["fmt", "README.md", "notes.md"]);
+    let (code, answer) = docfit(dir.path(), &["fmt", "README.md", "notes.md"]);
     assert_eq!(code, 2, "{answer}");
     assert_eq!(
         answer["error"],
@@ -566,7 +562,7 @@ fn fmt_naming_a_file_that_is_no_registered_document_is_refused_and_writes_nothin
 fn fmt_on_a_document_it_cannot_write_is_refused() {
     let dir = repo(&[("docfit.toml", README_ONLY), ("README.md", "A. B.\n")]);
     std::fs::create_dir(dir.path().join("README.md.tmp")).unwrap();
-    let (code, answer) = run(dir.path(), &["fmt"]);
+    let (code, answer) = docfit(dir.path(), &["fmt"]);
     assert_eq!(code, 2, "{answer}");
     let fix = answer["error"][0]["fix"].as_str().unwrap();
     assert!(

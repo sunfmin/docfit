@@ -13,13 +13,15 @@ const CLOSERS: [char; 11] = [')', ']', '"', '\'', '”', '’', '」', '』', '�
 /// of the line after it; a line it breaks keeps its indent, quote and list
 /// marker's width on each new line. Front matter, fenced code, tables,
 /// headings, HTML and link definitions come out byte for byte. A second
-/// run changes nothing.
-pub(crate) fn format(text: &str) -> String {
+/// run changes nothing. With it, the number (from 1) of the first line it
+/// broke: `None` when `text` was formatted already.
+pub(crate) fn format(text: &str) -> (String, Option<usize>) {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let tables = tables(&lines);
     let mut out = String::with_capacity(text.len());
     let mut front = lines.first().is_some_and(|l| l.trim_end() == "---");
     let mut fence: Option<(char, usize)> = None;
+    let mut first = None;
     for (n, line) in lines.iter().enumerate() {
         let (body, end) = split_end(line);
         let (prefix, rest) = container(body);
@@ -36,7 +38,11 @@ pub(crate) fn format(text: &str) -> String {
         } else if !tables[n] && !verbatim(rest) {
             out.push_str(&prefix.0);
             let again = if end.is_empty() { "\n" } else { end };
-            for (i, sentence) in sentences(rest).iter().enumerate() {
+            let sentences = sentences(rest);
+            if sentences.len() > 1 {
+                first = first.or(Some(n + 1));
+            }
+            for (i, sentence) in sentences.iter().enumerate() {
                 if i > 0 {
                     out.push_str(again);
                     out.push_str(&prefix.1);
@@ -48,7 +54,7 @@ pub(crate) fn format(text: &str) -> String {
         }
         out.push_str(line);
     }
-    out
+    (out, first)
 }
 
 /// A line's text and its line ending.
@@ -120,17 +126,13 @@ fn starts_block(s: &str) -> bool {
 /// Each block of lines between blank lines that holds a table's delimiter
 /// row is a table, every line of it.
 fn tables(lines: &[&str]) -> Vec<bool> {
-    let mut marks = vec![false; lines.len()];
-    let mut start = 0;
-    for n in 0..=lines.len() {
-        if n == lines.len() || lines[n].trim().is_empty() {
-            if lines[start..n].iter().any(|l| delimiter_row(l)) {
-                marks[start..n].fill(true);
-            }
-            start = n + 1;
-        }
-    }
-    marks
+    lines
+        .split_inclusive(|l| l.trim().is_empty())
+        .flat_map(|block| {
+            let table = block.iter().any(|l| delimiter_row(l));
+            std::iter::repeat_n(table, block.len())
+        })
+        .collect()
 }
 
 /// `|---|:--:|`, or `--- | ---`: a table's delimiter row.
@@ -184,20 +186,12 @@ fn sentences(rest: &str) -> Vec<&str> {
     out
 }
 
-/// The number (from 1) of the first line `format` changes in `text`, if it
-/// changes one: `format` only breaks lines, so a changed line is one that
-/// differs from its formatted line.
-pub(crate) fn first_unformatted(text: &str) -> Option<usize> {
-    let formatted = format(text);
-    text.lines()
-        .zip(formatted.lines())
-        .position(|(a, b)| a != b)
-        .map(|n| n + 1)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::format;
+    /// The formatted text alone.
+    fn format(text: &str) -> String {
+        super::format(text).0
+    }
 
     #[test]
     fn english_breaks_after_each_sentence() {
@@ -268,8 +262,8 @@ mod tests {
     }
 
     #[test]
-    fn the_first_line_it_would_change_is_named() {
-        assert_eq!(super::first_unformatted("a\nb\nc. d\n"), Some(3));
-        assert_eq!(super::first_unformatted("a\n"), None);
+    fn the_first_line_it_breaks_is_named() {
+        assert_eq!(super::format("a\nb\nc. d\ne. f\n").1, Some(3));
+        assert_eq!(super::format("a\n").1, None);
     }
 }
