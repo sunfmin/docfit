@@ -168,7 +168,7 @@ pub(crate) fn config(config: &str) -> Result<Config, Vec<Refusal>> {
                 ),
             });
         }
-        Some(names.unwrap_or_default())
+        names
     };
     let listed = names(
         refs::KEY,

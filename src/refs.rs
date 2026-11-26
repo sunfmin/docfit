@@ -168,20 +168,6 @@ pub(crate) fn ratchet(found: &Found, held: Option<&Baseline>, next: &mut Baselin
     }
 }
 
-/// `next` holding each file's refs at its count in `found` now, up or down,
-/// and no other file's: the one move up, when a repo drops `local_issue_refs`
-/// for the rule. A file it then holds nothing else of leaves it.
-pub(crate) fn rehold(found: &Found, next: &mut Baseline) {
-    next.retain(|_, held| {
-        match held {
-            Held::Over(h) => h.local_refs = None,
-            Held::Rehome(r) => r.local_refs = None,
-        }
-        *held != Held::Over(Hold::default())
-    });
-    ratchet(found, None, next);
-}
-
 /// The `local-refs` debt: each file of `found` whose refs `baseline` holds,
 /// with every ref and its line.
 pub(crate) fn debt<'a>(found: &'a Found, baseline: &Baseline) -> Vec<Debt<'a>> {
@@ -278,24 +264,5 @@ mod tests {
         ] {
             assert_eq!(refs(text), [], "{text}");
         }
-    }
-
-    #[test]
-    fn rehold_moves_each_files_count_to_now_and_drops_a_hold_of_refs_alone() {
-        let mut next: Baseline = serde_json::from_value(json!({
-            "a.rs": { "local_refs": 2 }, "b.rs": { "local_refs": 9 },
-            "R.md": { "bytes": 40, "local_refs": 1 }, "S.md": { "rehome": 5, "local_refs": 1 }
-        }))
-        .unwrap();
-        let mut found = Found::new();
-        found.insert(
-            "a.rs".into(),
-            find("guild#1 guild#2 guild#3", &Rule::Unlisted(vec![])),
-        );
-        rehold(&found, &mut next);
-        assert_eq!(
-            json!(next),
-            json!({ "a.rs": { "local_refs": 3 }, "R.md": { "bytes": 40 }, "S.md": { "rehome": 5 } })
-        );
     }
 }

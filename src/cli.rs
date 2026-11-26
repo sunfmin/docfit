@@ -623,15 +623,17 @@ impl Counted<'_> {
     }
 }
 
-/// The baseline `held` ratchets to: the budgets' and the counts'.
+/// The baseline `held` ratchets to: the budgets' and the counts', the local
+/// refs' from `refs_held` (`None`: each held at its count now).
 fn ratcheted(
     docs: &[Measured],
     strays: &[Stray],
     counted: &Counted,
     held: Option<&Baseline>,
+    refs_held: Option<&Baseline>,
 ) -> Baseline {
     let mut next = budget::ratchet(docs, strays, held);
-    refs::ratchet(counted.refs, held, &mut next);
+    refs::ratchet(counted.refs, refs_held, &mut next);
     restates::ratchet(&counted.restated, held, &mut next);
     measurements::ratchet(&counted.measured, held, &mut next);
     next
@@ -779,7 +781,7 @@ fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let faults = faults(&answer, &docs, &strays, &counted, held.as_ref());
     let tighter = held
         .as_ref()
-        .is_some_and(|h| &ratcheted(&docs, &strays, &counted, Some(h)) != h);
+        .is_some_and(|h| &ratcheted(&docs, &strays, &counted, Some(h), Some(h)) != h);
     let off = match config.refs {
         refs::Rule::Listed(_) => format!(
             "; {CONFIG} still has `{}`, from docfit 0.1.3: run `docfit ratchet --local-refs` once (`docfit check --help`, What trips you up)",
@@ -879,11 +881,7 @@ fn ratchet(repo: Option<PathBuf>, local_refs: bool) -> Result<(String, i32), Vec
     let had = written(&top)?;
     // `--local-refs`: the config without `local_issue_refs`, so the refs are
     // counted by the rule, and each file held at its count now.
-    let text = if local_refs {
-        dropped(&had)?
-    } else {
-        had.clone()
-    };
+    let text = if local_refs { dropped(&had)? } else { had };
     let (answer, tracked, config) = registered(&top, &text)?;
     let seen = Read::at(&top, &config, &tracked)?;
     let counted = seen.counted(&answer);
@@ -891,9 +889,10 @@ fn ratchet(repo: Option<PathBuf>, local_refs: bool) -> Result<(String, i32), Vec
     let docs = measured(&texts, &Tree::new(&tracked));
     let held = baseline(&top)?;
     let strays = strays(&top, &answer)?;
-    let mut next = ratcheted(&docs, &strays, &counted, held.as_ref());
+    // `--local-refs` holds each file's refs as on a repo without a baseline.
+    let refs_held = held.as_ref().filter(|_| !local_refs);
+    let next = ratcheted(&docs, &strays, &counted, held.as_ref(), refs_held);
     if local_refs {
-        refs::rehold(counted.refs, &mut next);
         write(&top.join(CONFIG), &text)?;
     }
     let changed = held.as_ref() != Some(&next);
@@ -961,40 +960,32 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
     // evidence.
     let refs = counted.refs;
     let debt = [
-        ("rehome", REHOME, Some("to rehome"), rehome),
-        ("over-budget", REHOME, Some("over its budget"), over_budget),
+        ("rehome", Some("to rehome"), rehome),
+        ("over-budget", Some("over its budget"), over_budget),
         (
-            "local-refs",
             "local-refs",
             Some("at a count of local refs"),
             refs::debt(refs, &held),
         ),
         (
             "restates",
-            "restates",
             Some("at a count of restatements"),
             restates::debt(&counted.restated, &held),
         ),
         (
             "measurement",
-            "measurement",
             Some("at a count of measurements"),
             measurements::debt(&counted.measured, &held),
         ),
-        (
-            "hot-file",
-            "hot-file",
-            None,
-            hot::debt(&docs, &history, seen.hot),
-        ),
+        ("hot-file", None, hot::debt(&docs, &history, seen.hot)),
     ];
     let (mut tasks, mut counts) = (Vec::new(), serde_json::Map::new());
     let listed = match &seen.refs {
-        refs::Rule::Listed(names) => vec![names],
-        refs::Rule::Unlisted(_) => Vec::new(),
+        refs::Rule::Listed(names) => Some(names),
+        refs::Rule::Unlisted(_) => None,
     };
-    counts.insert(DROP.to_string(), json!(listed.len()));
-    for names in listed {
+    counts.insert(DROP.to_string(), json!(usize::from(listed.is_some())));
+    if let Some(names) = listed {
         tasks.push(json!({
             "kind": DROP,
             "summary": format!("{CONFIG} still lists `{}`, docfit 0.1.3's: a ref to a name it does not list, such as a checkout added or gone since, goes uncounted; drop it for the rule, which needs no list", refs::KEY),
@@ -1004,7 +995,9 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
             "evidence": { refs::KEY: names },
         }));
     }
-    for (kind, topic, holds, debts) in debt {
+    for (kind, holds, debts) in debt {
+        // A task's steps are `docfit help <kind>`, an over-budget's `rehome`'s.
+        let topic = if kind == "over-budget" { REHOME } else { kind };
         counts.insert(kind.to_string(), json!(debts.len()));
         for debt in debts {
             let mut evidence = debt.evidence;

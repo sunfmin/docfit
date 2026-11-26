@@ -380,7 +380,10 @@ fn ratchet_local_refs_on_a_list_written_other_than_as_its_line_is_refused() {
     let (code, answer) = docfit(dir.path(), &["ratchet", "--local-refs"]);
     assert_eq!(code, 2, "{answer}");
     let fix = answer["error"][0]["fix"].as_str().unwrap();
-    assert!(fix.contains("as a line `local_issue_refs = [...]`"), "{fix}");
+    assert!(
+        fix.contains("as a line `local_issue_refs = [...]`"),
+        "{fix}"
+    );
     let kept = std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap();
     assert_eq!(kept, toml);
 }
