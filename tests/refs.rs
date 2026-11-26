@@ -1,5 +1,6 @@
-//! `docfit check`, `ratchet` and `init` on local tracker refs (`local_issue_refs`):
-//! their JSON and exit code.
+//! `docfit check`, `ratchet`, `init` and `next` on local tracker refs: by the
+//! rule, which needs no list, and by docfit 0.1.3's `local_issue_refs`, with
+//! the upgrade from one to the other: their JSON and exit code.
 
 mod common;
 
@@ -168,42 +169,185 @@ fn init_on_a_baseline_holding_no_refs_adopts_them_and_once_held_leaves_them() {
     assert_eq!(answer["faults"][0]["fault"], "local_ref");
 }
 
+const RULE: &str = "[documents]\n\"README.md\" = \"readme\"\n";
+
 #[test]
-fn without_local_issue_refs_the_check_is_off_and_next_says_how_to_turn_it_on() {
+fn by_the_rule_a_ref_to_any_tracker_in_a_comment_is_red_with_no_list() {
     let dir = repo(&[
-        ("docfit.toml", "[documents]\n\"README.md\" = \"readme\"\n"),
-        (
-            ".docfit/baseline.json",
-            "{\"src/a.rs\": {\"local_refs\": 1}}\n",
-        ),
+        ("docfit.toml", RULE),
+        (".docfit/baseline.json", "{}\n"),
         ("README.md", "r\n"),
-        ("src/a.rs", "// rollmind#1 rollmind#2\n"),
+        ("src/a.rs", "fn a() {}\n// as guild#66 asked\n"),
     ]);
     let (code, answer) = check(dir.path());
-    assert_eq!(code, 0, "{answer}");
-    let next = answer["next"].as_str().unwrap();
-    assert!(next.contains("local_issue_refs = ["), "{next}");
-    let (_, answer) = docfit(dir.path(), &["ratchet"]);
-    assert_eq!(answer["changed"], false, "{answer}");
+    assert_eq!(code, 1, "{answer}");
+    let fault = &answer["faults"][0];
+    assert_eq!(
+        (
+            &fault["file"],
+            &fault["fault"],
+            &fault["line"],
+            &fault["ref"]
+        ),
+        (
+            &json!("src/a.rs"),
+            &json!("local_ref"),
+            &json!(2),
+            &json!("guild#66")
+        )
+    );
+    assert!(
+        fault["fix"]
+            .as_str()
+            .unwrap()
+            .contains("docfit help local-refs"),
+        "{fault}"
+    );
 }
 
 #[test]
-fn a_local_issue_refs_that_is_not_a_list_of_names_is_refused() {
+fn by_the_rule_an_owner_a_url_a_symbol_a_path_or_a_capital_is_no_ref() {
+    let text = "sunfmin/kiln#25 https://x/issues/3 {closure#0} a.md#3 C#1\n";
+    let dir = repo(&[
+        ("docfit.toml", RULE),
+        (".docfit/baseline.json", "{}\n"),
+        ("README.md", "r\n"),
+        ("src/a.rs", text),
+    ]);
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 0, "{answer}");
+}
+
+#[test]
+fn a_name_in_not_issue_refs_is_no_ref() {
+    let toml = format!("not_issue_refs = [\"shim\"]\n{RULE}");
+    let dir = repo(&[
+        ("docfit.toml", &toml),
+        (".docfit/baseline.json", "{}\n"),
+        ("README.md", "r\n"),
+        ("src/a.rs", "// shim#2 is a symbol\n"),
+    ]);
+    assert_eq!(check(dir.path()).0, 0);
+    std::fs::write(dir.path().join("src/a.rs"), "// shim#2, kiln#3\n").unwrap();
+    let (code, answer) = check(dir.path());
+    assert_eq!((code, &answer["faults"][0]["ref"]), (1, &json!("kiln#3")));
+}
+
+#[test]
+fn a_not_issue_refs_that_is_not_a_list_of_names_is_refused() {
     for bad in [
-        "local_issue_refs = \"rollmind\"",
-        "local_issue_refs = [\"a b\"]",
-        "local_issue_refs = [\"\"]",
+        "not_issue_refs = \"shim\"",
+        "not_issue_refs = [\"Shim\"]",
+        "not_issue_refs = [\"\"]",
     ] {
-        let toml = format!("{bad}\n[documents]\n\"README.md\" = \"readme\"\n");
+        let toml = format!("{bad}\n{RULE}");
         let dir = repo(&[("docfit.toml", &toml), ("README.md", "r\n")]);
         let (code, answer) = check(dir.path());
         assert_eq!(code, 2, "{bad}: {answer}");
         let fix = answer["error"][0]["fix"].as_str().unwrap();
-        assert!(
-            fix.contains("local_issue_refs = [\"<name>\", ...]"),
-            "{fix}"
-        );
+        assert!(fix.contains("not_issue_refs = [\"<name>\", ...]"), "{fix}");
     }
+}
+
+#[test]
+fn init_without_a_config_writes_no_list_and_holds_each_files_refs_by_the_rule() {
+    let dir = repo(&[
+        ("README.md", "r\n"),
+        ("src/a.rs", "// guild#66 kiln#1 sunfmin/kiln#2\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["baseline"], json!({"src/a.rs": {"local_refs": 2}}));
+    let toml = std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap();
+    assert!(!toml.contains("local_issue_refs"), "{toml}");
+    assert_eq!(check(dir.path()).0, 0);
+}
+
+/// A repo docfit 0.1.3 adopted: `local_issue_refs` listed, under a comment
+/// naming it, and its baseline holding the listed refs only, beside a ref to
+/// a checkout the list lacks and a fixture's made-up one.
+fn upgraded() -> tempfile::TempDir {
+    let toml = "# Docs.\n# local_issue_refs: the checkouts when docfit was wired in.\nlocal_issue_refs = [\"mill\"]\n\n[documents]\n\"README.md\" = { kind = \"readme\", bytes = 10 }\n";
+    let held =
+        "{\"README.md\": {\"bytes\": 37, \"local_refs\": 1}, \"src/a.rs\": {\"local_refs\": 2}}\n";
+    repo(&[
+        ("docfit.toml", toml),
+        (".docfit/baseline.json", held),
+        ("README.md", "mill#1 xxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"),
+        ("src/a.rs", "// mill#1 mill#2 guild#66\n"),
+        ("tests/data.rs", "const T: &str = \"proj#7\";\n"),
+    ])
+}
+
+#[test]
+fn a_repo_on_local_issue_refs_is_green_the_day_it_upgrades_and_next_asks_to_drop_it() {
+    let dir = upgraded();
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 0, "{answer}");
+    let next = answer["next"].as_str().unwrap();
+    assert!(next.contains("docfit ratchet --local-refs"), "{next}");
+    let (_, answer) = docfit(dir.path(), &["ratchet"]);
+    assert_eq!(answer["changed"], false, "{answer}");
+
+    let (code, answer) = docfit(dir.path(), &["next", "--all"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["counts"]["drop-local-issue-refs"], 1, "{answer}");
+    let task = &answer["tasks"][0];
+    assert_eq!(task["kind"], "drop-local-issue-refs");
+    assert_eq!(task["files"], json!(["docfit.toml"]));
+    assert_eq!(task["evidence"], json!({"local_issue_refs": ["mill"]}));
+    let steps = task["steps"].as_str().unwrap();
+    assert!(
+        steps.contains("docfit ratchet --local-refs") && !steps.contains("{const:"),
+        "{steps}"
+    );
+    let help = std::process::Command::new(env!("CARGO_BIN_EXE_docfit"))
+        .args(["help", "drop-local-issue-refs"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8(help.stdout).unwrap().contains(steps));
+}
+
+#[test]
+fn the_drop_tasks_steps_delete_the_list_hold_the_rules_counts_once_and_stay_green() {
+    let dir = upgraded();
+    let (code, answer) = docfit(dir.path(), &["ratchet", "--local-refs"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["changed"], true);
+    assert_eq!(
+        answer["baseline"],
+        json!({"README.md": {"bytes": 37, "local_refs": 1}, "src/a.rs": {"local_refs": 3}, "tests/data.rs": {"local_refs": 1}})
+    );
+    let toml = std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap();
+    assert_eq!(
+        toml,
+        "# Docs.\n\n[documents]\n\"README.md\" = { kind = \"readme\", bytes = 10 }\n"
+    );
+    assert_eq!(check(dir.path()).0, 0);
+
+    // Step 2: the fixture's made-up ref is test data, ignored by glob.
+    let ignored = format!("ignore = [\"tests/**\"]\n{toml}");
+    std::fs::write(dir.path().join("docfit.toml"), ignored).unwrap();
+    let (_, answer) = docfit(dir.path(), &["ratchet"]);
+    assert_eq!(
+        answer["baseline"],
+        json!({"README.md": {"bytes": 37, "local_refs": 1}, "src/a.rs": {"local_refs": 3}})
+    );
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 0, "{answer}");
+    let (_, answer) = docfit(dir.path(), &["next", "--all"]);
+    assert_eq!(answer["counts"]["drop-local-issue-refs"], 0, "{answer}");
+
+    // Once: without the list, nothing may move a count up again.
+    std::fs::write(
+        dir.path().join("src/a.rs"),
+        "// guild#1 guild#2 guild#3 guild#4\n",
+    )
+    .unwrap();
+    let (code, answer) = docfit(dir.path(), &["ratchet", "--local-refs"]);
+    assert_eq!(code, 2, "{answer}");
+    assert_eq!(answer["error"][0]["fix"], "run `docfit ratchet`");
+    assert_eq!(check(dir.path()).0, 1);
 }
 
 #[test]
@@ -227,4 +371,84 @@ fn a_tracked_file_gone_from_the_working_tree_is_not_read() {
     ]);
     std::fs::remove_file(dir.path().join("src/gone.rs")).unwrap();
     assert_eq!(check(dir.path()).0, 0);
+}
+
+#[test]
+fn ratchet_local_refs_on_a_list_written_other_than_as_its_line_is_refused() {
+    let toml = format!("\"local_issue_refs\" = [\"mill\"]\n{RULE}");
+    let dir = repo(&[("docfit.toml", &toml), ("README.md", "r\n")]);
+    let (code, answer) = docfit(dir.path(), &["ratchet", "--local-refs"]);
+    assert_eq!(code, 2, "{answer}");
+    let fix = answer["error"][0]["fix"].as_str().unwrap();
+    assert!(
+        fix.contains("as a line `local_issue_refs = [...]`"),
+        "{fix}"
+    );
+    let kept = std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap();
+    assert_eq!(kept, toml);
+}
+
+#[test]
+fn a_local_issue_refs_that_is_not_a_list_of_names_is_refused() {
+    for bad in [
+        "local_issue_refs = \"rollmind\"",
+        "local_issue_refs = [\"a b\"]",
+        "local_issue_refs = [\"\"]",
+    ] {
+        let toml = format!("{bad}\n{RULE}");
+        let dir = repo(&[("docfit.toml", &toml), ("README.md", "r\n")]);
+        let (code, answer) = check(dir.path());
+        assert_eq!(code, 2, "{bad}: {answer}");
+        let fix = answer["error"][0]["fix"].as_str().unwrap();
+        assert!(
+            fix.contains("local_issue_refs = [\"<name>\", ...]"),
+            "{fix}"
+        );
+    }
+}
+
+#[test]
+fn ratchet_local_refs_deletes_only_the_lists_lines_wherever_it_is() {
+    for (toml, kept) in [
+        (
+            format!("local_issue_refs = [\n  \"mill\",\n]\n{RULE}"),
+            RULE.to_string(),
+        ),
+        (
+            format!(
+                "ignore = [\"x/local_issue_refs/**\"] # local_issue_refs\nlocal_issue_refs = [\"mill\"]\n{RULE}"
+            ),
+            format!("ignore = [\"x/local_issue_refs/**\"] # local_issue_refs\n{RULE}"),
+        ),
+    ] {
+        let dir = repo(&[("docfit.toml", &toml), ("README.md", "r\n")]);
+        let (code, answer) = docfit(dir.path(), &["ratchet", "--local-refs"]);
+        assert_eq!(code, 0, "{answer}");
+        let now = std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap();
+        assert_eq!(now, kept);
+    }
+}
+
+#[test]
+fn on_local_issue_refs_a_baseline_that_can_tighten_says_ratchet_beside_the_upgrade() {
+    let dir = repo(&[
+        (
+            "docfit.toml",
+            &format!("local_issue_refs = [\"mill\"]\n{RULE}"),
+        ),
+        (
+            ".docfit/baseline.json",
+            "{\"src/a.rs\": {\"local_refs\": 2}}\n",
+        ),
+        ("README.md", "r\n"),
+        ("src/a.rs", "// mill#1\n"),
+    ]);
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 0, "{answer}");
+    let next = answer["next"].as_str().unwrap();
+    assert!(
+        next.starts_with("run `docfit ratchet`: a file shrank")
+            && next.contains("docfit ratchet --local-refs"),
+        "{next}"
+    );
 }

@@ -1,0 +1,40 @@
+{
+  "tree": "7025799b4846e17b3e18f6f7cdd64c2467cc5116+d1fba762150c532c",
+  "picker": "codex:01a21528-3f28-7553-8918-c2e71467c841:default",
+  "author": "claude-code:0b51c950-8f43-5715-afc7-282310761cdb:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/documents.rs:175:27: replace && with || in config",
+        "why": "The removed validation test covered empty and malformed legacy names, while its replacement checks only `not_issue_refs`.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/documents.rs:504:17: replace > with >= in without",
+        "why": "The successful migration fixture puts the legacy key below two comments, leaving the preceding-line lookup at line zero untested.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/documents.rs:505:9: replace && with || in without",
+        "why": "The migration fixture lacks a preceding TOML assignment whose value or inline comment mentions the legacy key, which this mutation could delete.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/cli.rs:794:17: replace match guard tighter with false in check",
+        "why": "The migration tests check the upgrade hint and exit status, leaving room for a green check to omit the ratchet hint when the baseline can shrink.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  },
+  "removed_tests": {
+    "rust": [
+      "src/refs.rs:170: a_ref_is_a_listed_name_then_hash_digits",
+      "src/refs.rs:183: an_owner_a_url_a_longer_name_or_a_word_after_is_no_ref",
+      "tests/refs.rs:172: without_local_issue_refs_the_check_is_off_and_next_says_how_to_turn_it_on"
+    ]
+  }
+}

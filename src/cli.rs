@@ -104,7 +104,7 @@ enum Cmd {
     ///
     /// ## Local tracker refs
     ///
-    /// Content a repo keeps never cites the local tracker: its issues live in one host's database, so a ref to one is a pointer no later reader can follow. `docfit.toml` names the tracker's refs, before its first table: `{const:LOCAL_REFS} = ["rollmind", "factorium"]`, each a name whose `<name>#<digits>` (`rollmind#38`) cites the local tracker; whoever wires docfit into the repo writes it. Without it this check is off, and `next` says how to turn it on. It reads every text file git tracks that `ignore` does not match ({const:IGNORED} among them: the fits' records are their bookkeeping), Markdown or not; a file with a NUL byte in its first 8000 is binary, and not read, and so is one it cannot read or a symbolic link. A ref is `<name>#<digits>` with a listed name, not run on by a letter, digit, `-`, `_` or `.` before it or a letter, digit or `_` after it; one with an owner (`sunfmin/lore#25`) or in a URL (a word with `://`) is not local. A commit message is not read: it may carry an issue's id, as long as it reads alone. `docfit check` is red on a file with more refs than the baseline holds it at (none, unless held). The baseline holds a file's count shrink-only: `docfit init` holds each file's count when it adopts docfit, or on a baseline that holds no refs yet; `docfit ratchet` (holding each as `docfit init` does on a repo without a baseline) lowers it to the count now, drops it at 0, and never adds a file it does not hold.
+    /// Content a repo keeps never cites the local tracker: its issues live in one host's database, so a ref to one is a pointer no later reader can follow. What a ref is, and how a name that is no tracker is kept out, is `docfit help local-refs`. It reads every text file git tracks that `ignore` does not match ({const:IGNORED} among them: the fits' records are their bookkeeping), Markdown or not; a file with a NUL byte in its first 8000 is binary, and not read, and so is one it cannot read or a symbolic link. A commit message is not read: it may carry an issue's id, as long as it reads alone. `docfit check` is red on a file with more refs than the baseline holds it at (none, unless held). The baseline holds a file's count shrink-only: `docfit init` holds each file's count when it adopts docfit, or on a baseline that holds no refs yet; `docfit ratchet` (holding each as `docfit init` does on a repo without a baseline) lowers it to the count now, drops it at 0, and never adds a file it does not hold.
     ///
     /// ## What it answers
     ///
@@ -142,7 +142,7 @@ enum Cmd {
     ///
     /// ## What it may refuse
     ///
-    /// It exits {const:EXIT_ERROR}, naming every fault at once, outside a git repository, without a `docfit.toml` or its `[documents]` table, on a `docfit.toml` that is not TOML, on a glob that is not one, on an `ignore` that is not a list of globs, on a `{const:LOCAL_REFS}` that is not a list of names (letters, digits, `-`, `_`, `.`), on a `catalogs` that is not a list of globs or a glob in it that matches no tracked file, on a catalog it cannot read, on an entry that is neither a kind nor a table of `kind`, `bytes` and `paragraph`, on a kind docfit does not know (the fix lists the kinds), on a document it cannot read as UTF-8 text, and on a baseline that is not one.
+    /// It exits {const:EXIT_ERROR}, naming every fault at once, outside a git repository, without a `docfit.toml` or its `[documents]` table, on a `docfit.toml` that is not TOML, on a glob that is not one, on an `ignore` that is not a list of globs, on a `{const:LOCAL_REFS}` that is not a list of names (letters, digits, `-`, `_`, `.`), on a `{const:NOT_REFS}` that is not a list of names `[a-z][a-z0-9_-]*`, on a `catalogs` that is not a list of globs or a glob in it that matches no tracked file, on a catalog it cannot read, on an entry that is neither a kind nor a table of `kind`, `bytes` and `paragraph`, on a kind docfit does not know (the fix lists the kinds), on a document it cannot read as UTF-8 text, and on a baseline that is not one.
     ///
     /// ## What trips you up
     ///
@@ -151,6 +151,7 @@ enum Cmd {
     /// - It measures the working tree, not git's index: an edit not yet staged counts.
     /// - A pointer is there only if git tracks it: a file the build makes, or one `.gitignore` hides, is `broken_pointer`. Name such a file, or one that does not exist yet, without backticks; a name with a `/` under no tracked directory, such as `models/` the build makes, is not a pointer and keeps its backticks.
     /// - A document that shrank stays held at the old size until `docfit ratchet` runs: run it and commit the baseline with the change.
+    /// - A `{const:CONFIG}` written for docfit 0.1.3 lists `{const:LOCAL_REFS}`: while it is there, a ref is counted only with a name it lists, as 0.1.3 counted it, so the repo is green the day it upgrades. `docfit next --all` then answers a `{const:DROP}` task: `docfit ratchet --local-refs` deletes the field and holds each file's refs at their count now by the rule, once (`docfit help {const:DROP}`).
     #[command(
         next_help_heading = "Run by the agent, and by the gate",
         verbatim_doc_comment
@@ -220,7 +221,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads what `docfit check` reads, and writes `{const:BASELINE}` (whole, through a file beside it renamed over it) when the baseline moves. With no baseline yet, it holds each document over its budget, in each measure it is over, at its size now, and each Markdown file registered under no kind to rehome, at its size in bytes now. With one, a file held to rehome is held at the smaller of what is held and its size now, and leaves it once it is gone or registered under a kind; a file registered under no kind it does not hold is never added; each measure held moves to the smaller of what is held and the size now; a measure it does not hold stays unheld, so a document that grows over its budget is never added; a measure back within budget leaves it. Broken pointers likewise: with no baseline yet, each pointer broken now is held in its document; with one, a held pointer leaves once it is fixed (or its document goes), and a pointer broken since is never added. Local tracker refs likewise, by each file's count (`docfit check --help`); with the check off, a held count stays as it is. Restatements likewise, by each document's count of catalog strings and of copied runs.
+    /// It reads what `docfit check` reads, and writes `{const:BASELINE}` (whole, through a file beside it renamed over it) when the baseline moves. With no baseline yet, it holds each document over its budget, in each measure it is over, at its size now, and each Markdown file registered under no kind to rehome, at its size in bytes now. With one, a file held to rehome is held at the smaller of what is held and its size now, and leaves it once it is gone or registered under a kind; a file registered under no kind it does not hold is never added; each measure held moves to the smaller of what is held and the size now; a measure it does not hold stays unheld, so a document that grows over its budget is never added; a measure back within budget leaves it. Broken pointers likewise: with no baseline yet, each pointer broken now is held in its document; with one, a held pointer leaves once it is fixed (or its document goes), and a pointer broken since is never added. Local tracker refs likewise, by each file's count (`docfit check --help`); with `--local-refs`, once, each file's count is held at its count now by the rule, up or down (`docfit help {const:DROP}`). Restatements likewise, by each document's count of catalog strings and of copied runs.
     ///
     /// ## What it answers
     ///
@@ -243,6 +244,9 @@ enum Cmd {
         /// The repository to ratchet (default: the one containing the current directory).
         #[arg(long, verbatim_doc_comment)]
         repo: Option<PathBuf>,
+        /// Once, on a `{const:CONFIG}` that still has `{const:LOCAL_REFS}` (docfit 0.1.3's): delete it, and hold each file's local refs at their count now by the rule (`docfit help local-refs`), up or down, beside the ratchet. It writes `{const:CONFIG}` too, and refuses on one without the field: only then may a count move up.
+        #[arg(long, verbatim_doc_comment)]
+        local_refs: bool,
     },
     /// Lists a document by paragraph: what can be seen in each mechanically, and the home that suggests.
     ///
@@ -329,7 +333,7 @@ enum Cmd {
     /// - `by`: the docfit that read them, `docfit <version>`.
     /// - `counts`: how many tasks of each kind there are, and `{const:MUST_READ}`: the bytes of the documents of the kind `agent` summed, which every agent reads on every turn. It is a trend, never a task or a fault: each of them has its own budget.
     /// - `tasks`, with `--all`: every task, by kind in the order below, each in path order; without it, `task`: the first, or null. Each has:
-    ///   - `kind`: `rehome`, a file the baseline holds to rehome that is still registered under no kind; `over-budget`, a document the baseline holds over its budget that is still over it; `local-refs`, a file the baseline holds at a count of local tracker refs that still cites one; `restates`, a document it holds at a count of catalog strings or copied runs that still restates one; `measurement`, a document it holds at a count of measurements that still holds one (`docfit check --help`); or `hot-file`, a registered document that is hot (above), held or not. A file with several of these is a task of each.
+    ///   - `kind`: `rehome`, a file the baseline holds to rehome that is still registered under no kind; `over-budget`, a document the baseline holds over its budget that is still over it; `local-refs`, a file the baseline holds at a count of local tracker refs that still cites one; `restates`, a document it holds at a count of catalog strings or copied runs that still restates one; `measurement`, a document it holds at a count of measurements that still holds one (`docfit check --help`); `hot-file`, a registered document that is hot (above), held or not; or `{const:DROP}`, one task, on `{const:CONFIG}`, while it still has `{const:LOCAL_REFS}` (`docfit help {const:DROP}`), its `evidence` the names it lists. A file with several of these is a task of each.
     ///   - `summary`: the file, and what it is.
     ///   - `files`: the one file, from the repo's top.
     ///   - `steps`: how to pay it; the text `docfit help <kind>` prints, `docfit help rehome` for `rehome` and `over-budget`.
@@ -403,7 +407,9 @@ enum Cmd {
 #[topic(name = "rehome")]
 struct RehomeTopic;
 
-/// How to take a file's local tracker refs out, and so pay a `local-refs` task of `docfit next`.
+/// What a local tracker ref is, and how to take a file's refs out, and so pay a `local-refs` task of `docfit next`.
+///
+/// A local ref is `<name>#<digits>` (`guild#66`) that a later reader cannot follow: it names no owner, so it is one host's tracker, whichever. It needs no list of trackers. `<name>` is `[a-z][a-z0-9_-]*`, not after a letter, a digit, `/` (an owner's: `sunfmin/lore#25` is no local ref, and a public issue is always written so, or as its URL), `.` (`a.md#3`), `:` or `{` (`{closure#0}`); the digits are not run on by a letter, a digit or `_`; and it is not in a URL (a word with `://`). A name that is no tracker in the repo is listed in `{const:CONFIG}`, before its first table, as `{const:NOT_REFS} = ["shim"]`; test data that writes refs is `ignore`d by glob. A `{const:CONFIG}` that still has `{const:LOCAL_REFS}` counts as docfit 0.1.3 did instead (`docfit help {const:DROP}`).
 ///
 /// 1. For each ref in the task's `evidence` (`refs`, each with its `line`), read the issue it names: `factorium issue show <ref>`.
 /// 2. Replace the ref with what the reader needed from it: the person's words, with who, date and where; or the command and the number it printed. Or delete the ref, if what is around it reads alone without it.
@@ -411,6 +417,15 @@ struct RehomeTopic;
 #[derive(Topic)]
 #[topic(name = "local-refs")]
 struct LocalRefsTopic;
+
+/// How to drop `{const:LOCAL_REFS}`, docfit 0.1.3's list of names, for the rule that needs none (`docfit help local-refs`), and so pay a `{const:DROP}` task of `docfit next`. While the list is there, a ref is counted only with a name it lists: one to a checkout added or gone since goes uncounted.
+///
+/// 1. Run `docfit ratchet --local-refs`: it deletes `{const:LOCAL_REFS}` from `{const:CONFIG}`, with the comment lines just above it that name it, and holds each file's refs at their count now by the rule, up or down. It does this once: on a `{const:CONFIG}` without the field it refuses.
+/// 2. Read `git diff {const:BASELINE}`. A file it now holds that is test data (a fixture's made-up `proj#7`): add its glob to `ignore`. A name that is no tracker in the repo: add it to `{const:NOT_REFS}`. Then run `docfit ratchet`, which lowers each count.
+/// 3. Run `docfit check`, and commit `{const:CONFIG}` and the baseline together: the task is done once `{const:CONFIG}` has no `{const:LOCAL_REFS}` and `docfit check` exits {const:EXIT_OK}.
+#[derive(Topic)]
+#[topic(name = "drop-local-issue-refs")]
+struct DropTopic;
 
 /// How to take what a document restates out of it, and so pay a `restates` task of `docfit next`.
 ///
@@ -441,6 +456,7 @@ pub(crate) fn help() -> Help {
     Help::new(<Cli as clap::CommandFactory>::command())
         .topic::<RehomeTopic>()
         .topic::<LocalRefsTopic>()
+        .topic::<DropTopic>()
         .topic::<RestatesTopic>()
         .topic::<MeasurementTopic>()
         .topic::<HotFileTopic>()
@@ -450,6 +466,8 @@ pub(crate) fn help() -> Help {
         .constant("CONFIG", CONFIG)
         .constant("IGNORED", quoted(&documents::IGNORED))
         .constant("LOCAL_REFS", refs::KEY)
+        .constant("NOT_REFS", refs::NOT)
+        .constant("DROP", DROP)
         .constant("HOT", hot::shown())
         .constant("HOT_SHOWN", hot::SHOWN)
         .constant("MUST_READ", MUST_READ)
@@ -482,7 +500,7 @@ pub(crate) fn run(args: impl IntoIterator<Item = std::ffi::OsString>) -> (String
     match cli.command {
         Cmd::Check { repo } => check(repo).unwrap_or_else(refused),
         Cmd::Init { repo } => init(repo).unwrap_or_else(refused),
-        Cmd::Ratchet { repo } => ratchet(repo).unwrap_or_else(refused),
+        Cmd::Ratchet { repo, local_refs } => ratchet(repo, local_refs).unwrap_or_else(refused),
         Cmd::Where { file } => place(&file).unwrap_or_else(refused),
         Cmd::Next { all, repo } => next(repo, all).unwrap_or_else(refused),
         Cmd::Help { topic: None } => (help.index().expect("checked"), EXIT_OK),
@@ -528,17 +546,16 @@ fn texts<'a>(top: &Path, files: impl Iterator<Item = &'a String>) -> Vec<Text> {
 }
 
 /// The local refs in each of `kept`, the text files `config` does not
-/// ignore; `None` when it lists no `local_issue_refs`.
-fn found(config: &Config, kept: &[Text]) -> Option<Found> {
-    let names = config.local_refs.as_ref()?;
+/// ignore, by its rule.
+fn found(config: &Config, kept: &[Text]) -> Found {
     let mut found = Found::new();
     for file in kept {
-        let refs = refs::find(&file.text, names);
+        let refs = refs::find(&file.text, &config.refs);
         if !refs.is_empty() {
             found.insert(file.path.clone(), refs);
         }
     }
-    Some(found)
+    found
 }
 
 /// What `docfit check`, `ratchet` and `init` read of a repo beyond its
@@ -546,7 +563,7 @@ fn found(config: &Config, kept: &[Text]) -> Option<Found> {
 /// them, and its string catalogs.
 struct Read {
     kept: Vec<Text>,
-    found: Option<Found>,
+    found: Found,
     catalogs: Vec<Text>,
 }
 
@@ -578,7 +595,7 @@ impl Read {
             }
         }
         Counted {
-            refs: self.found.as_ref(),
+            refs: &self.found,
             restated,
             measured,
         }
@@ -588,7 +605,7 @@ impl Read {
 /// What the baseline holds a count of in each file: its local refs, and a
 /// document's restatements and measurements.
 struct Counted<'a> {
-    refs: Option<&'a Found>,
+    refs: &'a Found,
     restated: BTreeMap<&'a str, Restates>,
     measured: measurements::Found<'a>,
 }
@@ -606,29 +623,41 @@ impl Counted<'_> {
     }
 }
 
-/// The baseline `held` ratchets to: the budgets' and the counts'.
+/// The baseline `held` ratchets to: the budgets' and the counts', the local
+/// refs' from `refs_held` (`None`: each held at its count now).
 fn ratcheted(
     docs: &[Measured],
     strays: &[Stray],
     counted: &Counted,
     held: Option<&Baseline>,
+    refs_held: Option<&Baseline>,
 ) -> Baseline {
     let mut next = budget::ratchet(docs, strays, held);
-    refs::ratchet(counted.refs, held, &mut next);
+    refs::ratchet(counted.refs, refs_held, &mut next);
     restates::ratchet(&counted.restated, held, &mut next);
     measurements::ratchet(&counted.measured, held, &mut next);
     next
 }
 
-/// The documents registered at `top`, the paths git tracks, and `docfit.toml` read.
-fn registered_at(top: &Path) -> Result<(Answer, Vec<String>, Config), Vec<Refusal>> {
-    let config = config(top)?.ok_or_else(|| {
+/// The repo's `docfit.toml`, refused when it has none.
+fn written(top: &Path) -> Result<String, Vec<Refusal>> {
+    config(top)?.ok_or_else(|| {
         vec![refusal(
             &format!("there is no {CONFIG} at the repo's top"),
             &format!("run `docfit init`, or write {CONFIG} with a `[{TABLE}]` table, a line `\"<glob>\" = \"<kind>\"` per document (see `docfit check --help`)"),
         )]
-    })?;
-    let config = documents::config(&config)?;
+    })
+}
+
+/// The documents registered at `top`, the paths git tracks, and `docfit.toml` read.
+fn registered_at(top: &Path) -> Result<(Answer, Vec<String>, Config), Vec<Refusal>> {
+    registered(top, &written(top)?)
+}
+
+/// The documents `text`, a `docfit.toml`, registers at `top`, the paths git
+/// tracks, and `text` read.
+fn registered(top: &Path, text: &str) -> Result<(Answer, Vec<String>, Config), Vec<Refusal>> {
+    let config = documents::config(text)?;
     let tracked = repo::tracked(top)?;
     let answer = documents::check(&config, &tracked);
     Ok((answer, tracked, config))
@@ -716,11 +745,7 @@ fn faults(
         .cloned()
         .collect();
     faults.extend(budget::check(docs, strays, baseline));
-    faults.extend(
-        counted
-            .refs
-            .map_or_else(Vec::new, |f| refs::check(f, baseline)),
-    );
+    faults.extend(refs::check(counted.refs, baseline));
     faults.extend(restates::check(&counted.restated, baseline));
     faults.extend(measurements::check(&counted.measured, baseline));
     faults.sort_by(|a, b| a["file"].as_str().cmp(&b["file"].as_str()));
@@ -756,14 +781,13 @@ fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let faults = faults(&answer, &docs, &strays, &counted, held.as_ref());
     let tighter = held
         .as_ref()
-        .is_some_and(|h| &ratcheted(&docs, &strays, &counted, Some(h)) != h);
-    let off = if counted.refs.is_none() {
-        format!(
-            "; the `local_ref` check is off: to turn it on, write `{} = [\"<name>\", ...]` in {CONFIG}, the names whose `<name>#<digits>` cites the local tracker (`docfit check --help`)",
+        .is_some_and(|h| &ratcheted(&docs, &strays, &counted, Some(h), Some(h)) != h);
+    let off = match config.refs {
+        refs::Rule::Listed(_) => format!(
+            "; {CONFIG} still has `{}`, from docfit 0.1.3: run `docfit ratchet --local-refs` once (`docfit check --help`, What trips you up)",
             refs::KEY
-        )
-    } else {
-        String::new()
+        ),
+        refs::Rule::Unlisted(_) => String::new(),
     };
     let (code, next) = match faults.first() {
         Some(first) => (EXIT_FAULTS, first["fix"].clone()),
@@ -852,29 +876,63 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     ))
 }
 
-fn ratchet(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
+fn ratchet(repo: Option<PathBuf>, local_refs: bool) -> Result<(String, i32), Vec<Refusal>> {
     let top = top(repo)?;
-    let (answer, tracked, config) = registered_at(&top)?;
+    let had = written(&top)?;
+    // `--local-refs`: the config without `local_issue_refs`, so the refs are
+    // counted by the rule, and each file held at its count now.
+    let text = if local_refs { dropped(&had)? } else { had };
+    let (answer, tracked, config) = registered(&top, &text)?;
     let seen = Read::at(&top, &config, &tracked)?;
     let counted = seen.counted(&answer);
     let texts = read(&top, &answer)?;
     let docs = measured(&texts, &Tree::new(&tracked));
     let held = baseline(&top)?;
     let strays = strays(&top, &answer)?;
-    let next = ratcheted(&docs, &strays, &counted, held.as_ref());
+    // `--local-refs` holds each file's refs as on a repo without a baseline.
+    let refs_held = held.as_ref().filter(|_| !local_refs);
+    let next = ratcheted(&docs, &strays, &counted, held.as_ref(), refs_held);
+    if local_refs {
+        write(&top.join(CONFIG), &text)?;
+    }
     let changed = held.as_ref() != Some(&next);
     if changed {
         write(&top.join(BASELINE), &(pretty(&json!(next)) + "\n"))?;
     }
-    let then = if changed {
+    let then = if local_refs {
+        format!("commit {CONFIG} and {BASELINE}, then `docfit check`")
+    } else if changed {
         format!("commit {BASELINE} with the change, then `docfit check`")
     } else {
         "nothing to ratchet: run `docfit check`".to_string()
     };
     Ok((
-        pretty(&json!({ "changed": changed, "baseline": next, "next": then })),
+        pretty(&json!({ "changed": changed || local_refs, "baseline": next, "next": then })),
         EXIT_OK,
     ))
+}
+
+/// `text`, a `docfit.toml`, without its `local_issue_refs`: refused when it
+/// has none, so the refs are held anew by the rule once.
+fn dropped(text: &str) -> Result<String, Vec<Refusal>> {
+    let key = refs::KEY;
+    let has = text
+        .parse::<toml::Table>()
+        .is_ok_and(|t| t.contains_key(key));
+    if !has {
+        return Err(vec![refusal(
+            &format!(
+                "{CONFIG} has no `{key}`: its refs are already held by the rule (`docfit help local-refs`), and only that once may they move up"
+            ),
+            "run `docfit ratchet`",
+        )]);
+    }
+    documents::without(text, key).ok_or_else(|| {
+        vec![refusal(
+            &format!("{CONFIG} has `{key}` but not as a line `{key} = [...]` before its first table"),
+            &format!("write `{key}` in {CONFIG} as a line `{key} = [...]` before its first table, then run `docfit ratchet --local-refs`"),
+        )]
+    })
 }
 
 fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>> {
@@ -900,52 +958,56 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
     // file, which no baseline holds, is done within its budget), and its
     // debt. The rehome steps start from `docfit where`, so its answer is
     // evidence.
-    let (rehome_steps, refs) = (RehomeTopic::MARKDOWN, counted.refs);
+    let refs = counted.refs;
     let debt = [
-        ("rehome", rehome_steps, Some("to rehome"), rehome),
-        (
-            "over-budget",
-            rehome_steps,
-            Some("over its budget"),
-            over_budget,
-        ),
+        ("rehome", Some("to rehome"), rehome),
+        ("over-budget", Some("over its budget"), over_budget),
         (
             "local-refs",
-            LocalRefsTopic::MARKDOWN,
             Some("at a count of local refs"),
-            refs.map_or_else(Vec::new, |f| refs::debt(f, &held)),
+            refs::debt(refs, &held),
         ),
         (
             "restates",
-            RestatesTopic::MARKDOWN,
             Some("at a count of restatements"),
             restates::debt(&counted.restated, &held),
         ),
         (
             "measurement",
-            MeasurementTopic::MARKDOWN,
             Some("at a count of measurements"),
             measurements::debt(&counted.measured, &held),
         ),
-        (
-            "hot-file",
-            HotFileTopic::MARKDOWN,
-            None,
-            hot::debt(&docs, &history, seen.hot),
-        ),
+        ("hot-file", None, hot::debt(&docs, &history, seen.hot)),
     ];
     let (mut tasks, mut counts) = (Vec::new(), serde_json::Map::new());
-    for (kind, steps, holds, debts) in debt {
+    let listed = match &seen.refs {
+        refs::Rule::Listed(names) => Some(names),
+        refs::Rule::Unlisted(_) => None,
+    };
+    counts.insert(DROP.to_string(), json!(usize::from(listed.is_some())));
+    if let Some(names) = listed {
+        tasks.push(json!({
+            "kind": DROP,
+            "summary": format!("{CONFIG} still lists `{}`, docfit 0.1.3's: a ref to a name it does not list, such as a checkout added or gone since, goes uncounted; drop it for the rule, which needs no list", refs::KEY),
+            "files": [CONFIG],
+            "steps": steps(DROP),
+            "accept": format!("{CONFIG} has no `{}`, and `docfit check` exits {EXIT_OK}", refs::KEY),
+            "evidence": { refs::KEY: names },
+        }));
+    }
+    for (kind, holds, debts) in debt {
+        // A task's steps are `docfit help <kind>`, an over-budget's `rehome`'s.
+        let topic = if kind == "over-budget" { REHOME } else { kind };
         counts.insert(kind.to_string(), json!(debts.len()));
         for debt in debts {
             let mut evidence = debt.evidence;
-            if steps == rehome_steps {
+            if topic == REHOME {
                 let text = tracked_text(&top, debt.file).map_err(|r| vec![r])?;
                 evidence["where"] = seen.place(debt.file, &text);
             }
             tasks.push(json!({
                 "kind": kind, "summary": debt.summary, "files": [debt.file],
-                "steps": steps,
+                "steps": steps(topic),
                 "accept": match holds {
                     Some(holds) => format!(
                         "`docfit ratchet`, then `docfit check` exits {EXIT_OK} and {BASELINE} no longer holds `{}` {holds}",
@@ -984,6 +1046,20 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
     }
     Ok((pretty(&answer), EXIT_OK))
 }
+
+/// The topic whose steps pay a `rehome` or an `over-budget` task.
+const REHOME: &str = "rehome";
+
+/// The steps of a `docfit next` task: what `docfit help <topic>` prints,
+/// without its title.
+fn steps(topic: &str) -> String {
+    let text = help().topic_help(topic).expect("the manual is whole");
+    let (_, body) = text.split_once('\n').expect("a title, then the text");
+    body.trim().to_string()
+}
+
+/// The kind of `docfit next`'s task to drop `local_issue_refs`.
+const DROP: &str = "drop-local-issue-refs";
 
 /// The count of the agent documents' bytes in `docfit next`'s `counts`.
 const MUST_READ: &str = "must_read_bytes";
@@ -1028,6 +1104,7 @@ struct Seen {
     read: Read,
     adrs: Vec<Adr>,
     hot: Hot,
+    refs: refs::Rule,
 }
 
 impl Seen {
@@ -1052,6 +1129,7 @@ impl Seen {
             read,
             adrs,
             hot: config.hot,
+            refs: config.refs,
         })
     }
 
