@@ -1,0 +1,40 @@
+{
+  "tree": "110535f94bded7019a8578d7bbd5768394e9113d+d1fba762150c532c",
+  "picker": "codex:01a2156f-e1d7-7d43-93b0-166f16c61865:default",
+  "author": "claude-code:82d079fb-577e-5111-9fe7-aa7c1c523827:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/cli.rs:764:19: replace match guard e.kind() == std::io::ErrorKind::NotFound with true in baseline",
+        "why": "The merged test covers an absent and a readable baseline, so treating another read error as absence could pass.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/budget.rs:289:17: replace > with >= in ratchet",
+        "why": "The merged ratchet test exercises growth and reduction, leaving room for a regression that records a value exactly at its limit.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/paragraph.rs:221:40: replace > with >= in longest",
+        "why": "Choosing the last of two equally long paragraphs preserves the reported length and can change the fault line, which the merged test leaves unchecked.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/budget.rs:221:27: replace > with >= in check",
+        "why": "The merged test checks equality against held byte and paragraph limits, leaving the boundary in this later comparison unexercised.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  },
+  "removed_tests": {
+    "rust": [
+      "tests/check.rs:289: an_entry_with_line_is_refused_with_the_shapes_docfit_reads",
+      "tests/check.rs:299: over_budget_but_within_the_baseline_is_green_and_growth_past_it_red",
+      "tests/check.rs:1016: an_ignore_that_is_not_a_list_of_globs_is_refused"
+    ]
+  }
+}

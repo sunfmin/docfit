@@ -144,6 +144,14 @@ fn a_docfit_toml_docfit_cannot_read_is_refused_with_its_fix() {
             "[documents]\n\"README.md\" = { kind = \"readme\", size = 3 }\n",
             "give `README.md` one of the kinds readme, agent, adr, glossary, design-note, skill, product, as `\"<kind>\"` or `{ kind",
         ),
+        (
+            "[documents]\n\"README.md\" = { kind = \"readme\", line = 100 }\n",
+            "give `README.md` one of the kinds readme, agent, adr, glossary, design-note, skill, product, as `\"<kind>\"` or `{ kind = \"<kind>\", bytes = <n>, paragraph = <n> }`",
+        ),
+        (
+            "ignore = \"src/**\"\n[documents]\n",
+            "write `ignore = [\"<glob>\", ...]`",
+        ),
     ] {
         let dir = repo(&[("docfit.toml", toml), ("README.md", "r\n")]);
         let (code, answer) = check(dir.path());
@@ -286,60 +294,6 @@ fn an_entrys_paragraph_budget_holds() {
 }
 
 #[test]
-fn an_entry_with_line_is_refused_with_the_shapes_docfit_reads() {
-    let toml = "[documents]\n\"README.md\" = { kind = \"readme\", line = 100 }\n";
-    let dir = repo(&[("docfit.toml", toml), ("README.md", "r\n")]);
-    let (code, answer) = check(dir.path());
-    assert_eq!(code, 2, "{answer}");
-    let fix = answer["error"][0]["fix"].as_str().unwrap();
-    assert!(fix.contains("paragraph = <n>"), "{fix}");
-}
-
-#[test]
-fn over_budget_but_within_the_baseline_is_green_and_growth_past_it_red() {
-    let dir = repo(&[("docfit.toml", BIG), ("README.md", TWO)]);
-    let (code, answer) = docfit(dir.path(), &["ratchet"]);
-    assert_eq!(code, 0, "{answer}");
-    assert_eq!(answer["changed"], true);
-    let held = serde_json::json!({ "README.md": { "bytes": 12, "paragraph": 7 } });
-    assert_eq!(answer["baseline"], held);
-    assert_eq!(baseline(dir.path()), held);
-    let (code, answer) = check(dir.path());
-    assert_eq!(code, 0, "{answer}");
-
-    std::fs::write(dir.path().join("README.md"), "ab\n\nabcdefgh\n").unwrap();
-    let (code, answer) = check(dir.path());
-    assert_eq!(code, 1, "{answer}");
-    let faults = answer["faults"].as_array().unwrap();
-    assert_eq!(
-        (&faults[0]["fault"], &faults[0]["limit"]),
-        (&"over_budget".into(), &12.into())
-    );
-    assert!(
-        faults[0]["fix"]
-            .as_str()
-            .unwrap()
-            .contains("(it is 13, past the 12 .docfit/baseline.json holds it at)"),
-        "{answer}"
-    );
-    assert_eq!(
-        (&faults[1]["fault"], &faults[1]["limit"]),
-        (&"paragraph_too_long".into(), &7.into())
-    );
-    assert!(
-        faults[1]["fix"]
-            .as_str()
-            .unwrap()
-            .contains("(it is 8, past the 7 .docfit/baseline.json holds it at)"),
-        "{answer}"
-    );
-    assert!(
-        !faults[1]["fix"].as_str().unwrap().contains("adopting"),
-        "{answer}"
-    );
-}
-
-#[test]
 fn a_baseline_holding_a_line_holds_no_paragraph_and_ratchet_writes_it_anew() {
     let old = "{\"README.md\": {\"bytes\": 12, \"line\": 7}}\n";
     let dir = repo(&[
@@ -372,14 +326,49 @@ fn ratchet_never_raises_a_number() {
         ("README.md", "abcdefghijkl\n"),
         ("A.md", "a\n"),
     ]);
-    docfit(dir.path(), &["ratchet"]);
+    let (code, answer) = docfit(dir.path(), &["ratchet"]);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["changed"], true);
+    let held = serde_json::json!({ "README.md": { "bytes": 13, "paragraph": 12 } });
+    assert_eq!(answer["baseline"], held);
+    assert_eq!(baseline(dir.path()), held);
+    // Over budget but within the baseline: green.
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 0, "{answer}");
+
+    // Grown past the baseline: red, each fix naming the size it is held at.
+    std::fs::write(dir.path().join("README.md"), "abcdefghijklmn\n").unwrap();
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 1, "{answer}");
+    let faults = answer["faults"].as_array().unwrap();
     assert_eq!(
-        baseline(dir.path()),
-        serde_json::json!({ "README.md": { "bytes": 13, "paragraph": 12 } })
+        (&faults[0]["fault"], &faults[0]["limit"]),
+        (&"over_budget".into(), &13.into())
+    );
+    assert!(
+        faults[0]["fix"]
+            .as_str()
+            .unwrap()
+            .contains("(it is 15, past the 13 .docfit/baseline.json holds it at)"),
+        "{answer}"
+    );
+    assert_eq!(
+        (&faults[1]["fault"], &faults[1]["limit"]),
+        (&"paragraph_too_long".into(), &12.into())
+    );
+    assert!(
+        faults[1]["fix"]
+            .as_str()
+            .unwrap()
+            .contains("(it is 14, past the 12 .docfit/baseline.json holds it at)"),
+        "{answer}"
+    );
+    assert!(
+        !faults[1]["fix"].as_str().unwrap().contains("adopting"),
+        "{answer}"
     );
 
     // Grown, and a new document over its budget: neither raises the baseline.
-    std::fs::write(dir.path().join("README.md"), "abcdefghijklmn\n").unwrap();
     std::fs::write(dir.path().join("A.md"), "abcdefghijklmn\n").unwrap();
     let (code, answer) = docfit(dir.path(), &["ratchet"]);
     assert_eq!((code, &answer["changed"]), (0, &false.into()), "{answer}");
@@ -1039,21 +1028,6 @@ fn the_fits_records_are_ignored_without_any_entry() {
     assert_eq!(code, 0, "{answer}");
     let (_, adopted) = docfit(dir.path(), &["init"]);
     assert_eq!(adopted["ignored"], serde_json::json!([]), "{adopted}");
-}
-
-#[test]
-fn an_ignore_that_is_not_a_list_of_globs_is_refused() {
-    let toml = "ignore = \"src/**\"\n[documents]\n";
-    let dir = repo(&[("docfit.toml", toml)]);
-    let (code, answer) = check(dir.path());
-    assert_eq!(code, 2, "{answer}");
-    assert!(
-        answer["error"][0]["fix"]
-            .as_str()
-            .unwrap()
-            .starts_with("write `ignore = [\"<glob>\", ...]`"),
-        "{answer}"
-    );
 }
 
 #[test]
