@@ -1,0 +1,33 @@
+{
+  "tip": "db2f4bd2e92da7d925b5c54cd929d0c3fb51810f",
+  "from": "6bad0d8909249998c277d31f8a129714c90b8bbc",
+  "pool": 765,
+  "drawn": {
+    "rust": [
+      {
+        "name": "src/restates.rs:147:5: replace whole -> bool with false",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/documents.rs:278:5: replace check -> Answer with Default::default()",
+        "outcome": "unviable"
+      },
+      {
+        "name": "src/measurements.rs:23:5: replace find -> Option<Vec<(usize, String)>> with Some(vec![(1, String::new())])",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/tasks.rs:48:86: replace > with == in debt",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/cli.rs:741:5: replace faults -> Vec<Value> with vec![Default::default()]",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/repo.rs:101:5: replace at_last_change -> Option<(String, String, Sizes)> with Some((String::new(), String::new(), Default::default()))",
+        "outcome": "killed"
+      }
+    ]
+  }
+}
