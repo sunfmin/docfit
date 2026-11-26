@@ -12,6 +12,7 @@ mod pointers;
 mod refs;
 mod repo;
 mod restates;
+mod survey;
 mod tasks;
 
 // build.rs runs it to stamp the version; compiled here too, for its tests.
