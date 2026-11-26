@@ -1,0 +1,10 @@
+{
+  "tree": "631180eba7adbe8a1b4bd61bcc0cd2153ffcab78+d1fba762150c532c",
+  "lines": 59,
+  "serves": "docfit#25",
+  "considered": "git() in src/repo.rs, made the one runner (fed stdin) so check-ignore reuses its refusals; tracked()'s -z parsing, shared as paths(); pointers::check's walk, kept as missing() rather than copied",
+  "reviewer": "codex:01a21549-1d3e-7d90-bf6b-50364e1fc4d2:default",
+  "author": "claude-code:69627151-1ffe-5b6e-a593-5923330818f6:opus",
+  "cut": "In src/pointers.rs and src/cli.rs, keep Tree tracked-only and reuse the unresolved pointers from a single scan of each document to build the Git batch and emit the remaining faults. Delete Tree::ignoring, unheld, and the second scan.",
+  "answer": "Made: Tree is tracked-only again, pointers::missing scans each document once, cli::measured builds the one git batch from it and drops the ignored before making faults; Tree::ignoring, unheld and the second scan are gone"
+}

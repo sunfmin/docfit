@@ -1,0 +1,15 @@
+{
+  "tree": "f52748654efeb3481e521ed08e843f4535c1455f+d1fba762150c532c",
+  "picker": "codex:01a21556-c8fd-74f1-b4ec-94a65baa8c93:default",
+  "author": "claude-code:69627151-1ffe-5b6e-a593-5923330818f6:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/repo.rs:41:23: replace match guard ok.contains(&code) with true in fed",
+        "why": "The added tests cover matches and no matches but never make git check-ignore exit with a fatal error, which this mutant accepts as success.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}

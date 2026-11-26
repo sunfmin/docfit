@@ -41,7 +41,7 @@ pub(crate) const EXIT_ERROR: i32 = 2;
 ///
 /// ## Pointers
 ///
-/// What a document points at stays true: each repo path it names in backticks or links to, and each ADR it names by number (`ADR 0007` is a file `{const:ADRS}0007-*`), must be a path git tracks, or a directory holding one. `docfit check` is red on one that is not, naming the document, the line and what is missing. A pointer that breaks shows at once; a copy that goes stale shows nowhere, so point rather than copy: `docfit check` is red on a new copy of a catalog's string or of another file's lines (`docfit check --help`, Restatements).
+/// What a document points at stays true: each repo path it names in backticks or links to, and each ADR it names by number (`ADR 0007` is a file `{const:ADRS}0007-*`), must be a path git tracks, or a directory holding one, or a path git ignores. `docfit check` is red on one that is not, naming the document, the line and what is missing. A pointer that breaks shows at once; a copy that goes stale shows nowhere, so point rather than copy: `docfit check` is red on a new copy of a catalog's string or of another file's lines (`docfit check --help`, Restatements).
 ///
 /// ## Output
 ///
@@ -69,7 +69,7 @@ enum Cmd {
     ///
     /// ## What it reads and writes
     ///
-    /// It reads `docfit.toml` at the top of the repo, and the paths git tracks there (`git ls-files`): every one ending `.md` is a document. A file on disk that git does not track is not. It reads each registered document's text from the working tree, every other text file git tracks that `ignore` does not match (for restatements and local tracker refs, below), the string catalogs `catalogs` lists (`docfit where --help`), and the baseline `{const:BASELINE}` if there is one. It writes nothing. `docfit.toml` holds one table, `[documents]`, a line per glob, the glob a path from the repo's top and the kind one of the kinds in `docfit --help`, or a table that also sets the document's budget, `bytes` (its size) or `paragraph` (its longest paragraph, in characters) or both:
+    /// It reads `docfit.toml` at the top of the repo, and the paths git tracks there (`git ls-files`): every one ending `.md` is a document. A file on disk that git does not track is not. It reads each registered document's text from the working tree, every other text file git tracks that `ignore` does not match (for restatements and local tracker refs, below), the string catalogs `catalogs` lists (`docfit where --help`), and the baseline `{const:BASELINE}` if there is one; it asks git, once, which of the paths the documents point at and git does not track it ignores. It writes nothing. `docfit.toml` holds one table, `[documents]`, a line per glob, the glob a path from the repo's top and the kind one of the kinds in `docfit --help`, or a table that also sets the document's budget, `bytes` (its size) or `paragraph` (its longest paragraph, in characters) or both:
     ///
     /// ```toml
     /// [documents]
@@ -115,8 +115,8 @@ enum Cmd {
     ///   - `rehome_grew`: a file registered under no kind, held to rehome, is `size` bytes, over `limit`, the bytes the baseline holds it at. Held to rehome, a file registered under no kind is no `unregistered` fault.
     ///   - `over_budget`: its size in bytes, `size`, is over `limit`, its budget or, when the baseline holds it at more, that.
     ///   - `paragraph_too_long`: its paragraph starting at line `line` is `size` characters, over `limit`, as above. The fix is to split it, or to move part of it to its home (`docfit where` suggests one).
-    ///   - `broken_pointer`: its line `line` points, as `pointer`, at `missing`, which git does not track, and the baseline does not hold that pointer broken in that document. A pointer is:
-    ///     - a backticked repo path: with a `/` in it, or a name ending in one of {const:EXTENSIONS}, and none of a command's space, a glob's `*`, a placeholder's `<>`, a URL's `:` (but a `:<line>` after it), or a leading `/` or `~`. A name with a `/` and none of those extensions is a pointer only when its first segment (`src` of `src/a/b`) is something git tracks at the repo's top or in the document's directory; otherwise it is a name, such as a model id `org/model` or a git ref `origin/main`, and is not checked. A pointer is read from the repo's top or the document's directory, and is there if either is.
+    ///   - `broken_pointer`: its line `line` points, as `pointer`, at `missing`, which git neither tracks nor ignores, and the baseline does not hold that pointer broken in that document. A pointer is:
+    ///     - a backticked repo path: with a `/` in it, or a name ending in one of {const:EXTENSIONS}, and none of a command's space, a glob's `*`, a placeholder's `<>`, a URL's `:` (but a `:<line>` after it), or a leading `/` or `~`. A name with a `/` and none of those extensions is a pointer only when its first segment (`src` of `src/a/b`) is something git tracks at the repo's top or in the document's directory; otherwise it is a name, such as a model id `org/model` or a git ref `origin/main`, and is not checked. A pointer is read from the repo's top or the document's directory, and is there if either is. One git ignores, as `git check-ignore --no-index` reads it from either, is a generated path a tool makes (`.slimfit/out`), and is not checked: a typo under an ignored directory goes unnoticed.
     ///     - a Markdown link's target, `[text](target)`, read from the document's directory (a leading `/` is the repo's top), without its `#anchor`. A URL (`https:`, `mailto:`) and an anchor alone are not checked.
     ///     - an ADR named by number, `ADR 0007` or `ADR-0007`: there must be a file `{const:ADRS}0007-*`.
     ///
@@ -149,7 +149,7 @@ enum Cmd {
     /// - A design note is off unless the repo turns it on: registering a file as `design-note` is turning it on, for that file.
     /// - A glob matches paths from the repo's top, whatever directory you run it in.
     /// - It measures the working tree, not git's index: an edit not yet staged counts.
-    /// - A pointer is there only if git tracks it: a file the build makes, or one `.gitignore` hides, is `broken_pointer`. Name such a file, or one that does not exist yet, without backticks; a name with a `/` under no tracked directory, such as `models/` the build makes, is not a pointer and keeps its backticks.
+    /// - A pointer is there only if git tracks it, or if `.gitignore` hides it: a path the build or a tool makes is named on purpose, so list it in `.gitignore` and keep its backticks. Name a file that does not exist yet without backticks; a name with a `/` under no tracked directory, such as `models/` the build makes, is not a pointer and keeps its backticks.
     /// - A document that shrank stays held at the old size until `docfit ratchet` runs: run it and commit the baseline with the change.
     /// - A `{const:CONFIG}` written for docfit 0.1.3 lists `{const:LOCAL_REFS}`: while it is there, a ref is counted only with a name it lists, as 0.1.3 counted it, so the repo is green the day it upgrades. `docfit next --all` then answers a `{const:DROP}` task: `docfit ratchet --local-refs` deletes the field and holds each file's refs at their count now by the rule, once (`docfit help {const:DROP}`).
     #[command(
@@ -682,21 +682,38 @@ fn read<'a>(
     }
 }
 
-/// Each document read, measured, with its pointers to what is not in `tree`.
-fn measured<'a>(texts: &'a [(&'a str, Document, String)], tree: &Tree) -> Vec<Measured<'a>> {
-    texts
+/// Each document read, measured, with its pointers to what git neither
+/// tracks nor ignores: git is asked once, for every pointer of them all.
+fn measured<'a>(
+    top: &Path,
+    texts: &'a [(&'a str, Document, String)],
+    tracked: &[String],
+) -> Result<Vec<Measured<'a>>, Vec<Refusal>> {
+    let tree = Tree::new(tracked);
+    let missing: Vec<_> = texts
         .iter()
-        .map(|(file, doc, text)| {
+        .map(|(file, _, text)| pointers::missing(file, text, &tree))
+        .collect();
+    let wanted = missing.iter().flatten().flat_map(|m| m.paths.clone());
+    let ignored: BTreeSet<String> = repo::ignored(top, &wanted.collect())?.into_iter().collect();
+    Ok(texts
+        .iter()
+        .zip(missing)
+        .map(|((file, doc, text), missing)| {
             let (size, at) = Size::of(text);
             Measured {
                 file,
                 budget: doc.budget,
                 size,
                 at,
-                broken: pointers::check(file, text, tree),
+                broken: missing
+                    .iter()
+                    .filter(|m| !m.paths.iter().any(|p| ignored.contains(p)))
+                    .map(|m| m.fault(file))
+                    .collect(),
             }
         })
-        .collect()
+        .collect())
 }
 
 /// Each tracked Markdown file registered under no kind, measured, with the
@@ -775,7 +792,7 @@ fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let seen = Read::at(&top, &config, &tracked)?;
     let counted = seen.counted(&answer);
     let texts = read(&top, &answer)?;
-    let docs = measured(&texts, &Tree::new(&tracked));
+    let docs = measured(&top, &texts, &tracked)?;
     let strays = strays(&top, &answer)?;
     let held = baseline(&top)?;
     let faults = faults(&answer, &docs, &strays, &counted, held.as_ref());
@@ -825,7 +842,7 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let answer = documents::check(&adopting, &files);
     let texts = read(&top, &answer)?;
     let strays = strays(&top, &answer)?;
-    let docs = measured(&texts, &Tree::new(&files));
+    let docs = measured(&top, &texts, &files)?;
     let seen = Read::at(&top, &adopting, &files)?;
     let counted = seen.counted(&answer);
     let held = baseline(&top)?;
@@ -886,7 +903,7 @@ fn ratchet(repo: Option<PathBuf>, local_refs: bool) -> Result<(String, i32), Vec
     let seen = Read::at(&top, &config, &tracked)?;
     let counted = seen.counted(&answer);
     let texts = read(&top, &answer)?;
-    let docs = measured(&texts, &Tree::new(&tracked));
+    let docs = measured(&top, &texts, &tracked)?;
     let held = baseline(&top)?;
     let strays = strays(&top, &answer)?;
     // `--local-refs` holds each file's refs as on a repo without a baseline.
@@ -939,7 +956,7 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
     let top = top(repo)?;
     let seen = Seen::at(&top)?;
     let texts = read(&top, &seen.answer)?;
-    let docs = measured(&texts, &Tree::new(&seen.tracked));
+    let docs = measured(&top, &texts, &seen.tracked)?;
     let strays = strays(&top, &seen.answer)?;
     let (held, mut notes) = match baseline(&top)? {
         Some(held) => (held, Vec::<String>::new()),
