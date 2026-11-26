@@ -1,7 +1,7 @@
 //! The command line, read against the manual: its commands, the manual's
 //! pages, and what docfit exits with.
 
-use crate::budget::{self, BASELINE, Baseline};
+use crate::budget::{BASELINE, Baseline};
 use crate::documents::{self, CONFIG, Refusal};
 use crate::hot;
 use crate::kind::Kind;
@@ -11,10 +11,7 @@ use crate::pointers;
 use crate::refs;
 use crate::repo;
 use crate::restates;
-use crate::survey::{
-    Read, Seen, baseline, config, faults, measured, ratcheted, read, registered, registered_at,
-    strays, tracked_text, write, written,
-};
+use crate::survey::{Seen, Survey, baseline, config, tracked_text, write, written};
 use crate::tasks;
 use agent_help::{Help, Topic};
 use clap::{FromArgMatches, Parser, Subcommand};
@@ -523,18 +520,14 @@ fn top(repo: Option<PathBuf>) -> Result<PathBuf, Vec<Refusal>> {
 
 fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let top = top(repo)?;
-    let (answer, tracked, config) = registered_at(&top)?;
-    let seen = Read::at(&top, &config, &tracked)?;
-    let counted = seen.counted(&answer);
-    let texts = read(&top, &answer)?;
-    let docs = measured(&top, &texts, &tracked)?;
-    let strays = strays(&top, &answer)?;
+    let survey = Survey::at(&top)?;
+    let judged = survey.judged(&top)?;
     let held = baseline(&top)?;
-    let faults = faults(&answer, &docs, &strays, &counted, held.as_ref());
+    let faults = judged.faults(held.as_ref());
     let tighter = held
         .as_ref()
-        .is_some_and(|h| &ratcheted(&docs, &strays, &counted, Some(h), Some(h)) != h);
-    let off = match config.refs {
+        .is_some_and(|h| &judged.ratcheted(Some(h), Some(h)) != h);
+    let off = match survey.config.refs {
         refs::Rule::Listed(_) => format!(
             "; {CONFIG} still has `{}`, from docfit 0.1.3: run `docfit ratchet --local-refs` once (`docfit check --help`, What trips you up)",
             refs::KEY
@@ -556,7 +549,8 @@ fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
             )),
         ),
     };
-    let kinds: std::collections::BTreeMap<_, _> = answer
+    let kinds: std::collections::BTreeMap<_, _> = survey
+        .answer
         .documents
         .iter()
         .map(|(f, d)| (f, d.kind.name()))
@@ -573,20 +567,11 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let files = repo::tracked(&top)?;
     let adoption = documents::adopt(config.as_deref(), &files)?;
     let text = adoption.text;
-    let adopting = documents::config(&text)?;
-    let answer = documents::check(&adopting, &files);
-    let texts = read(&top, &answer)?;
-    let strays = strays(&top, &answer)?;
-    let docs = measured(&top, &texts, &files)?;
-    let seen = Read::at(&top, &adopting, &files)?;
-    let counted = seen.counted(&answer);
+    let survey = Survey::of(&top, &text, files)?;
+    let judged = survey.judged(&top)?;
     let held = baseline(&top)?;
     let adopted = held.is_none();
-    let mut next = match &held {
-        Some(held) => held.clone(),
-        None => budget::ratchet(&docs, &strays, None),
-    };
-    counted.adopt(&mut next);
+    let next = judged.adopted(held.as_ref());
     let wrote_baseline = held.as_ref() != Some(&next);
     if wrote_baseline {
         write(&top.join(BASELINE), &(pretty(&json!(next)) + "\n"))?;
@@ -595,12 +580,13 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     if wrote_config {
         write(&top.join(CONFIG), &text)?;
     }
-    let rehome: Vec<Value> = strays
+    let rehome: Vec<Value> = judged
+        .strays
         .iter()
         .filter(|_| adopted)
         .map(|s| json!({ "file": s.file, "size": s.bytes, "kinds": s.fault["kinds"], "fix": s.fault["fix"] }))
         .collect();
-    let faults = faults(&answer, &docs, &strays, &counted, Some(&next));
+    let faults = judged.faults(Some(&next));
     let changed = wrote_baseline || wrote_config;
     let then = match faults.first() {
         Some(first) => first["fix"].clone(),
@@ -634,16 +620,12 @@ fn ratchet(repo: Option<PathBuf>, local_refs: bool) -> Result<(String, i32), Vec
     // `--local-refs`: the config without `local_issue_refs`, so the refs are
     // counted by the rule, and each file held at its count now.
     let text = if local_refs { dropped(&had)? } else { had };
-    let (answer, tracked, config) = registered(&top, &text)?;
-    let seen = Read::at(&top, &config, &tracked)?;
-    let counted = seen.counted(&answer);
-    let texts = read(&top, &answer)?;
-    let docs = measured(&top, &texts, &tracked)?;
+    let survey = Survey::of(&top, &text, repo::tracked(&top)?)?;
+    let judged = survey.judged(&top)?;
     let held = baseline(&top)?;
-    let strays = strays(&top, &answer)?;
     // `--local-refs` holds each file's refs as on a repo without a baseline.
     let refs_held = held.as_ref().filter(|_| !local_refs);
-    let next = ratcheted(&docs, &strays, &counted, held.as_ref(), refs_held);
+    let next = judged.ratcheted(held.as_ref(), refs_held);
     if local_refs {
         write(&top.join(CONFIG), &text)?;
     }
@@ -690,9 +672,9 @@ fn dropped(text: &str) -> Result<String, Vec<Refusal>> {
 fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>> {
     let top = top(repo)?;
     let seen = Seen::at(&top)?;
-    let texts = read(&top, &seen.answer)?;
-    let docs = measured(&top, &texts, &seen.tracked)?;
-    let strays = strays(&top, &seen.answer)?;
+    let survey = &seen.survey;
+    let judged = survey.judged(&top)?;
+    let (docs, counted) = (&judged.docs, &judged.counted);
     let (held, mut notes) = match baseline(&top)? {
         Some(held) => (held, Vec::<String>::new()),
         None => (
@@ -702,9 +684,9 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
             )],
         ),
     };
-    let counted = seen.read.counted(&seen.answer);
-    let [rehome, over_budget] = tasks::debt(&docs, &strays, &held);
-    let history = repo::history(&top, seen.hot.window)?;
+    let hot = survey.config.hot;
+    let [rehome, over_budget] = tasks::debt(docs, &judged.strays, &held);
+    let history = repo::history(&top, hot.window)?;
     // Each kind in the order `docfit next` answers it: its name, its steps,
     // what the baseline holds its file at until it is done (none: the hot
     // file, which no baseline holds, is done within its budget), and its
@@ -729,10 +711,10 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
             Some("at a count of measurements"),
             measurements::debt(&counted.measured, &held),
         ),
-        ("hot-file", None, hot::debt(&docs, &history, seen.hot)),
+        ("hot-file", None, hot::debt(docs, &history, hot)),
     ];
     let (mut tasks, mut counts) = (Vec::new(), serde_json::Map::new());
-    let listed = match &seen.refs {
+    let listed = match &survey.config.refs {
         refs::Rule::Listed(names) => Some(names),
         refs::Rule::Unlisted(_) => None,
     };
@@ -774,9 +756,13 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
             }));
         }
     }
-    let must_read = seen
-        .answer
-        .must_read(|f| texts.iter().find(|t| t.0 == f).map_or(0, |t| t.2.len()));
+    let must_read = survey.answer.must_read(|f| {
+        judged
+            .texts
+            .iter()
+            .find(|t| t.0 == f)
+            .map_or(0, |t| t.2.len())
+    });
     counts.insert(MUST_READ.to_string(), json!(must_read));
     notes.push(match must_read_then(&top) {
         Some((commit, then)) => format!("{MUST_READ} {must_read}, was {then} at {commit}, the commit {BASELINE} was last written in"),
