@@ -44,7 +44,9 @@ pub(crate) struct Restates {
 type Line<'a> = (usize, &'a str);
 
 /// Every run of [`RUN`] non-blank lines of the files it is made from, each
-/// with where it is: the file's path, and the line it starts on.
+/// with where it is: the file's path, and the line it first starts on there.
+/// One place per file, as a copy names one: a document that repeats a run
+/// is not held at each repeat, which made [`copies`] quadratic in it.
 pub(crate) struct Index<'a>(HashMap<Vec<&'a str>, Vec<(&'a str, usize)>>);
 
 /// `text`'s non-blank lines, trimmed.
@@ -62,7 +64,10 @@ impl<'a> Index<'a> {
         for t in texts {
             for run in lines(&t.text).windows(RUN) {
                 let key = run.iter().map(|l| l.1).collect();
-                at.entry(key).or_default().push((&t.path, run[0].0));
+                let at = at.entry(key).or_default();
+                if at.last().is_none_or(|&(path, _)| path != t.path) {
+                    at.push((&t.path, run[0].0));
+                }
             }
         }
         Index(at)
@@ -314,6 +319,22 @@ mod tests {
             .iter()
             .map(|c| (c.line, c.end))
             .collect()
+    }
+
+    #[test]
+    fn an_index_holds_a_run_once_per_file_at_its_first_line() {
+        let texts = [
+            Text {
+                path: "a.md".into(),
+                text: "x\n\n".repeat(1000),
+            },
+            Text {
+                path: "b.md".into(),
+                text: "y\nx\nx\nx\n".into(),
+            },
+        ];
+        let index = Index::new(&texts);
+        assert_eq!(index.0[&vec!["x"; RUN]], [("a.md", 1), ("b.md", 2)]);
     }
 
     #[test]
