@@ -1,8 +1,5 @@
 {
   "src/cli.rs": {
     "local_refs": 2
-  },
-  "src/refs.rs": {
-    "local_refs": 22
   }
 }
