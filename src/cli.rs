@@ -1,21 +1,21 @@
 //! The command line, read against the manual: its commands, the manual's
 //! pages, and what docfit exits with.
 
-use crate::budget::{self, BASELINE, Baseline, Measured, Size, Stray};
-use crate::documents::{self, Answer, CATALOGS, CONFIG, Config, Document, Refusal, TABLE};
-use crate::hot::{self, Hot};
+use crate::budget::{BASELINE, Baseline};
+use crate::documents::{self, CONFIG, Refusal};
+use crate::hot;
 use crate::kind::Kind;
 use crate::measurements;
-use crate::paragraph::{self, Adr, Home, Known};
-use crate::pointers::{self, Tree};
-use crate::refs::{self, Found};
+use crate::paragraph::{self, Home};
+use crate::pointers;
+use crate::refs;
 use crate::repo;
-use crate::restates::{self, Index, Restates, Text};
+use crate::restates;
+use crate::survey::{Seen, Survey, baseline, config, tracked_text, write, written};
 use crate::tasks;
 use agent_help::{Help, Topic};
 use clap::{FromArgMatches, Parser, Subcommand};
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// The command finished and found nothing wrong.
@@ -518,288 +518,16 @@ fn top(repo: Option<PathBuf>) -> Result<PathBuf, Vec<Refusal>> {
     repo::top(&repo.unwrap_or_else(|| PathBuf::from(".")))
 }
 
-/// The repo's `docfit.toml`: `None` when it has none.
-fn config(top: &Path) -> Result<Option<String>, Vec<Refusal>> {
-    match std::fs::read_to_string(top.join(CONFIG)) {
-        Ok(text) => Ok(Some(text)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(vec![refusal(
-            &format!("cannot read {CONFIG} at the repo's top: {e}"),
-            &format!("make {CONFIG} readable UTF-8 text, or restore it from git"),
-        )]),
-    }
-}
-
-/// The text of each of `files` at `top`: one that is a symbolic link, that
-/// cannot be read, or that holds a NUL byte in its first 8000 (binary), is
-/// not read.
-fn texts<'a>(top: &Path, files: impl Iterator<Item = &'a String>) -> Vec<Text> {
-    files
-        .filter(|f| std::fs::symlink_metadata(top.join(f)).is_ok_and(|m| !m.is_symlink()))
-        .filter_map(|f| Some((f, std::fs::read(top.join(f)).ok()?)))
-        .filter(|(_, bytes)| !bytes.iter().take(8000).any(|b| *b == 0))
-        .map(|(f, bytes)| Text {
-            path: f.clone(),
-            text: String::from_utf8_lossy(&bytes).into_owned(),
-        })
-        .collect()
-}
-
-/// The local refs in each of `kept`, the text files `config` does not
-/// ignore, by its rule.
-fn found(config: &Config, kept: &[Text]) -> Found {
-    let mut found = Found::new();
-    for file in kept {
-        let refs = refs::find(&file.text, &config.refs);
-        if !refs.is_empty() {
-            found.insert(file.path.clone(), refs);
-        }
-    }
-    found
-}
-
-/// What `docfit check`, `ratchet` and `init` read of a repo beyond its
-/// documents: its text files `docfit.toml` does not ignore, the local refs in
-/// them, and its string catalogs.
-struct Read {
-    kept: Vec<Text>,
-    found: Found,
-    catalogs: Vec<Text>,
-}
-
-impl Read {
-    fn at(top: &Path, config: &Config, tracked: &[String]) -> Result<Read, Vec<Refusal>> {
-        let kept = texts(top, config.kept(tracked));
-        Ok(Read {
-            found: found(config, &kept),
-            catalogs: catalogs(top, config, tracked)?,
-            kept,
-        })
-    }
-
-    /// What is counted in the files: the local refs, and what each document
-    /// `answer` registers restates, against the other text files and the
-    /// catalogs, and measures.
-    fn counted(&self, answer: &Answer) -> Counted<'_> {
-        let index = Index::new(&self.kept);
-        let (mut restated, mut measured) = (BTreeMap::new(), measurements::Found::new());
-        for t in &self.kept {
-            let Some(doc) = answer.documents.get(&t.path) else {
-                continue;
-            };
-            let paragraphs = paragraph::split(&t.text);
-            let found = restates::find(&t.path, &t.text, &paragraphs, &self.catalogs, &index);
-            restated.insert(t.path.as_str(), found);
-            if let Some(found) = measurements::find(doc.kind, &paragraphs) {
-                measured.insert(t.path.as_str(), found);
-            }
-        }
-        Counted {
-            refs: &self.found,
-            restated,
-            measured,
-        }
-    }
-}
-
-/// What the baseline holds a count of in each file: its local refs, and a
-/// document's restatements and measurements.
-struct Counted<'a> {
-    refs: &'a Found,
-    restated: BTreeMap<&'a str, Restates>,
-    measured: measurements::Found<'a>,
-}
-
-impl Counted<'_> {
-    /// `next` holding each count it holds none of yet: `docfit init`'s
-    /// adoption.
-    fn adopt(&self, next: &mut Baseline) {
-        // A baseline holding no refs has not adopted the check: hold them now.
-        if !refs::adopted(next) {
-            refs::ratchet(self.refs, None, next);
-        }
-        restates::adopt(&self.restated, next);
-        measurements::adopt(&self.measured, next);
-    }
-}
-
-/// The baseline `held` ratchets to: the budgets' and the counts', the local
-/// refs' from `refs_held` (`None`: each held at its count now).
-fn ratcheted(
-    docs: &[Measured],
-    strays: &[Stray],
-    counted: &Counted,
-    held: Option<&Baseline>,
-    refs_held: Option<&Baseline>,
-) -> Baseline {
-    let mut next = budget::ratchet(docs, strays, held);
-    refs::ratchet(counted.refs, refs_held, &mut next);
-    restates::ratchet(&counted.restated, held, &mut next);
-    measurements::ratchet(&counted.measured, held, &mut next);
-    next
-}
-
-/// The repo's `docfit.toml`, refused when it has none.
-fn written(top: &Path) -> Result<String, Vec<Refusal>> {
-    config(top)?.ok_or_else(|| {
-        vec![refusal(
-            &format!("there is no {CONFIG} at the repo's top"),
-            &format!("run `docfit init`, or write {CONFIG} with a `[{TABLE}]` table, a line `\"<glob>\" = \"<kind>\"` per document (see `docfit check --help`)"),
-        )]
-    })
-}
-
-/// The documents registered at `top`, the paths git tracks, and `docfit.toml` read.
-fn registered_at(top: &Path) -> Result<(Answer, Vec<String>, Config), Vec<Refusal>> {
-    registered(top, &written(top)?)
-}
-
-/// The documents `text`, a `docfit.toml`, registers at `top`, the paths git
-/// tracks, and `text` read.
-fn registered(top: &Path, text: &str) -> Result<(Answer, Vec<String>, Config), Vec<Refusal>> {
-    let config = documents::config(text)?;
-    let tracked = repo::tracked(top)?;
-    let answer = documents::check(&config, &tracked);
-    Ok((answer, tracked, config))
-}
-
-/// Every registered document, with its text read from the working tree.
-fn read<'a>(
-    top: &Path,
-    answer: &'a Answer,
-) -> Result<Vec<(&'a str, Document, String)>, Vec<Refusal>> {
-    let (mut texts, mut refusals) = (Vec::new(), Vec::new());
-    for (file, doc) in &answer.documents {
-        match tracked_text(top, file) {
-            Ok(text) => texts.push((file.as_str(), *doc, text)),
-            Err(r) => refusals.push(r),
-        }
-    }
-    if refusals.is_empty() {
-        Ok(texts)
-    } else {
-        Err(refusals)
-    }
-}
-
-/// Each document read, measured, with its pointers to what git neither
-/// tracks nor ignores: git is asked once, for every pointer of them all.
-fn measured<'a>(
-    top: &Path,
-    texts: &'a [(&'a str, Document, String)],
-    tracked: &[String],
-) -> Result<Vec<Measured<'a>>, Vec<Refusal>> {
-    let tree = Tree::new(tracked);
-    let missing: Vec<_> = texts
-        .iter()
-        .map(|(file, _, text)| pointers::missing(file, text, &tree))
-        .collect();
-    let wanted = missing.iter().flatten().flat_map(|m| m.paths.clone());
-    let ignored: BTreeSet<String> = repo::ignored(top, &wanted.collect())?.into_iter().collect();
-    Ok(texts
-        .iter()
-        .zip(missing)
-        .map(|((file, doc, text), missing)| {
-            let (size, at) = Size::of(text);
-            Measured {
-                file,
-                budget: doc.budget,
-                size,
-                at,
-                broken: missing
-                    .iter()
-                    .filter(|m| !m.paths.iter().any(|p| ignored.contains(p)))
-                    .map(|m| m.fault(file))
-                    .collect(),
-            }
-        })
-        .collect())
-}
-
-/// Each tracked Markdown file registered under no kind, measured, with the
-/// `unregistered` fault `answer` holds on it.
-fn strays<'a>(top: &Path, answer: &'a Answer) -> Result<Vec<Stray<'a>>, Vec<Refusal>> {
-    let (mut strays, mut refusals) = (Vec::new(), Vec::new());
-    for fault in answer
-        .faults
-        .iter()
-        .filter(|f| f["fault"] == "unregistered")
-    {
-        let file = fault["file"].as_str().expect("a fault names its file");
-        match std::fs::metadata(top.join(file)) {
-            Ok(meta) => strays.push(Stray {
-                file,
-                bytes: meta.len() as usize,
-                fault,
-            }),
-            Err(e) => refusals.push(refusal(
-                &format!("cannot read `{file}`, which git tracks: {e}"),
-                &format!("restore `{file}`, or `git rm` it"),
-            )),
-        }
-    }
-    if refusals.is_empty() {
-        Ok(strays)
-    } else {
-        Err(refusals)
-    }
-}
-
-/// Every fault, in path order: `answer`'s that are not a stray's, those
-/// `budget::check` finds in `docs` and `strays` against `baseline`, and
-/// those of `counted`.
-fn faults(
-    answer: &Answer,
-    docs: &[Measured],
-    strays: &[Stray],
-    counted: &Counted,
-    baseline: Option<&Baseline>,
-) -> Vec<Value> {
-    let mut faults: Vec<Value> = answer
-        .faults
-        .iter()
-        .filter(|f| f["fault"] != "unregistered")
-        .cloned()
-        .collect();
-    faults.extend(budget::check(docs, strays, baseline));
-    faults.extend(refs::check(counted.refs, baseline));
-    faults.extend(restates::check(&counted.restated, baseline));
-    faults.extend(measurements::check(&counted.measured, baseline));
-    faults.sort_by(|a, b| a["file"].as_str().cmp(&b["file"].as_str()));
-    faults
-}
-
-/// The baseline at the repo's top: `None` when it has none yet.
-fn baseline(top: &Path) -> Result<Option<Baseline>, Vec<Refusal>> {
-    match std::fs::read_to_string(top.join(BASELINE)) {
-        Ok(text) => serde_json::from_str(&text).map(Some).map_err(|e| {
-            vec![refusal(
-                &format!("{BASELINE} is not a baseline: {e}"),
-                &format!("restore {BASELINE} from git, or delete it and run `docfit ratchet`"),
-            )]
-        }),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(vec![refusal(
-            &format!("cannot read {BASELINE}: {e}"),
-            &format!("make {BASELINE} readable, or restore it from git"),
-        )]),
-    }
-}
-
 fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let top = top(repo)?;
-    let (answer, tracked, config) = registered_at(&top)?;
-    let seen = Read::at(&top, &config, &tracked)?;
-    let counted = seen.counted(&answer);
-    let texts = read(&top, &answer)?;
-    let docs = measured(&top, &texts, &tracked)?;
-    let strays = strays(&top, &answer)?;
+    let survey = Survey::at(&top)?;
+    let judged = survey.judged(&top)?;
     let held = baseline(&top)?;
-    let faults = faults(&answer, &docs, &strays, &counted, held.as_ref());
+    let faults = judged.faults(held.as_ref());
     let tighter = held
         .as_ref()
-        .is_some_and(|h| &ratcheted(&docs, &strays, &counted, Some(h), Some(h)) != h);
-    let off = match config.refs {
+        .is_some_and(|h| &judged.ratcheted(Some(h), Some(h)) != h);
+    let off = match survey.config.refs {
         refs::Rule::Listed(_) => format!(
             "; {CONFIG} still has `{}`, from docfit 0.1.3: run `docfit ratchet --local-refs` once (`docfit check --help`, What trips you up)",
             refs::KEY
@@ -821,7 +549,8 @@ fn check(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
             )),
         ),
     };
-    let kinds: std::collections::BTreeMap<_, _> = answer
+    let kinds: std::collections::BTreeMap<_, _> = survey
+        .answer
         .documents
         .iter()
         .map(|(f, d)| (f, d.kind.name()))
@@ -838,20 +567,11 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     let files = repo::tracked(&top)?;
     let adoption = documents::adopt(config.as_deref(), &files)?;
     let text = adoption.text;
-    let adopting = documents::config(&text)?;
-    let answer = documents::check(&adopting, &files);
-    let texts = read(&top, &answer)?;
-    let strays = strays(&top, &answer)?;
-    let docs = measured(&top, &texts, &files)?;
-    let seen = Read::at(&top, &adopting, &files)?;
-    let counted = seen.counted(&answer);
+    let survey = Survey::of(&top, &text, files)?;
+    let judged = survey.judged(&top)?;
     let held = baseline(&top)?;
     let adopted = held.is_none();
-    let mut next = match &held {
-        Some(held) => held.clone(),
-        None => budget::ratchet(&docs, &strays, None),
-    };
-    counted.adopt(&mut next);
+    let next = judged.adopted(held.as_ref());
     let wrote_baseline = held.as_ref() != Some(&next);
     if wrote_baseline {
         write(&top.join(BASELINE), &(pretty(&json!(next)) + "\n"))?;
@@ -860,12 +580,13 @@ fn init(repo: Option<PathBuf>) -> Result<(String, i32), Vec<Refusal>> {
     if wrote_config {
         write(&top.join(CONFIG), &text)?;
     }
-    let rehome: Vec<Value> = strays
+    let rehome: Vec<Value> = judged
+        .strays
         .iter()
         .filter(|_| adopted)
         .map(|s| json!({ "file": s.file, "size": s.bytes, "kinds": s.fault["kinds"], "fix": s.fault["fix"] }))
         .collect();
-    let faults = faults(&answer, &docs, &strays, &counted, Some(&next));
+    let faults = judged.faults(Some(&next));
     let changed = wrote_baseline || wrote_config;
     let then = match faults.first() {
         Some(first) => first["fix"].clone(),
@@ -899,16 +620,12 @@ fn ratchet(repo: Option<PathBuf>, local_refs: bool) -> Result<(String, i32), Vec
     // `--local-refs`: the config without `local_issue_refs`, so the refs are
     // counted by the rule, and each file held at its count now.
     let text = if local_refs { dropped(&had)? } else { had };
-    let (answer, tracked, config) = registered(&top, &text)?;
-    let seen = Read::at(&top, &config, &tracked)?;
-    let counted = seen.counted(&answer);
-    let texts = read(&top, &answer)?;
-    let docs = measured(&top, &texts, &tracked)?;
+    let survey = Survey::of(&top, &text, repo::tracked(&top)?)?;
+    let judged = survey.judged(&top)?;
     let held = baseline(&top)?;
-    let strays = strays(&top, &answer)?;
     // `--local-refs` holds each file's refs as on a repo without a baseline.
     let refs_held = held.as_ref().filter(|_| !local_refs);
-    let next = ratcheted(&docs, &strays, &counted, held.as_ref(), refs_held);
+    let next = judged.ratcheted(held.as_ref(), refs_held);
     if local_refs {
         write(&top.join(CONFIG), &text)?;
     }
@@ -955,9 +672,9 @@ fn dropped(text: &str) -> Result<String, Vec<Refusal>> {
 fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>> {
     let top = top(repo)?;
     let seen = Seen::at(&top)?;
-    let texts = read(&top, &seen.answer)?;
-    let docs = measured(&top, &texts, &seen.tracked)?;
-    let strays = strays(&top, &seen.answer)?;
+    let survey = &seen.survey;
+    let judged = survey.judged(&top)?;
+    let (docs, counted) = (&judged.docs, &judged.counted);
     let (held, mut notes) = match baseline(&top)? {
         Some(held) => (held, Vec::<String>::new()),
         None => (
@@ -967,9 +684,9 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
             )],
         ),
     };
-    let counted = seen.read.counted(&seen.answer);
-    let [rehome, over_budget] = tasks::debt(&docs, &strays, &held);
-    let history = repo::history(&top, seen.hot.window)?;
+    let hot = survey.config.hot;
+    let [rehome, over_budget] = tasks::debt(docs, &judged.strays, &held);
+    let history = repo::history(&top, hot.window)?;
     // Each kind in the order `docfit next` answers it: its name, its steps,
     // what the baseline holds its file at until it is done (none: the hot
     // file, which no baseline holds, is done within its budget), and its
@@ -994,10 +711,10 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
             Some("at a count of measurements"),
             measurements::debt(&counted.measured, &held),
         ),
-        ("hot-file", None, hot::debt(&docs, &history, seen.hot)),
+        ("hot-file", None, hot::debt(docs, &history, hot)),
     ];
     let (mut tasks, mut counts) = (Vec::new(), serde_json::Map::new());
-    let listed = match &seen.refs {
+    let listed = match &survey.config.refs {
         refs::Rule::Listed(names) => Some(names),
         refs::Rule::Unlisted(_) => None,
     };
@@ -1039,9 +756,13 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
             }));
         }
     }
-    let must_read = seen
-        .answer
-        .must_read(|f| texts.iter().find(|t| t.0 == f).map_or(0, |t| t.2.len()));
+    let must_read = survey.answer.must_read(|f| {
+        judged
+            .texts
+            .iter()
+            .find(|t| t.0 == f)
+            .map_or(0, |t| t.2.len())
+    });
     counts.insert(MUST_READ.to_string(), json!(must_read));
     notes.push(match must_read_then(&top) {
         Some((commit, then)) => format!("{MUST_READ} {must_read}, was {then} at {commit}, the commit {BASELINE} was last written in"),
@@ -1108,139 +829,6 @@ fn place(file: &Path) -> Result<(String, i32), Vec<Refusal>> {
         .into_owned();
     let seen = Seen::at(&top)?;
     Ok((pretty(&seen.place(&name, &text)), EXIT_OK))
-}
-
-/// What `docfit where` reads of a repo, once, to place any of its documents:
-/// its registered documents, the paths git tracks, the text of every tracked
-/// file outside Markdown, its string catalogs, and its ADRs; and, for `docfit
-/// next`, when `docfit.toml` holds a document hot.
-struct Seen {
-    answer: Answer,
-    tracked: Vec<String>,
-    code: Vec<String>,
-    read: Read,
-    adrs: Vec<Adr>,
-    hot: Hot,
-    refs: refs::Rule,
-}
-
-impl Seen {
-    fn at(top: &Path) -> Result<Seen, Vec<Refusal>> {
-        let (answer, tracked, config) = registered_at(top)?;
-        let code: Vec<String> = texts(top, tracked.iter().filter(|f| !f.ends_with(".md")))
-            .into_iter()
-            .map(|t| t.text)
-            .collect();
-        let read = Read::at(top, &config, &tracked)?;
-        let adrs = answer
-            .documents
-            .iter()
-            .filter(|(_, d)| d.kind == Kind::Adr)
-            .map(|(f, _)| tracked_text(top, f).map(|text| Adr::read(f, &text)))
-            .collect::<Result<_, _>>()
-            .map_err(|r| vec![r])?;
-        Ok(Seen {
-            answer,
-            tracked,
-            code,
-            read,
-            adrs,
-            hot: config.hot,
-            refs: config.refs,
-        })
-    }
-
-    /// `docfit where`'s answer on the document `name`, from the repo's top, of `text`.
-    fn place(&self, name: &str, text: &str) -> Value {
-        let paragraphs = paragraph::split(text);
-        let (paths, others): (BTreeSet<String>, BTreeSet<String>) =
-            paragraph::candidates(&paragraphs)
-                .into_iter()
-                .partition(|s| paragraph::is_path(s, &self.tracked));
-        let index = Index::new(&self.read.kept);
-        let restates = restates::find(name, text, &paragraphs, &self.read.catalogs, &index);
-        let known = Known {
-            words: paragraph::words(others.iter().map(String::as_str), &self.code),
-            paths,
-            restates: &restates,
-            adrs: &self.adrs,
-        };
-        let placed: Vec<_> = paragraphs
-            .iter()
-            .map(|p| paragraph::place(p, &known))
-            .collect();
-        let (mut homes, mut each) = (serde_json::Map::new(), Vec::new());
-        for home in Home::ALL {
-            let n = placed.iter().filter(|p| p.home == home).count();
-            homes.insert(home.name().to_string(), json!(n));
-            each.push(format!("{} {n}", home.name()));
-        }
-        let next = if placed.is_empty() {
-            format!("nothing to place: `{name}` has no paragraph")
-        } else {
-            format!(
-                "move each paragraph to its home ({}; `docfit where --help` says what each is), then run `docfit check`",
-                each.join(", ")
-            )
-        };
-        let kind = self.answer.documents.get(name).map(|d| d.kind.name());
-        json!({ "file": name, "kind": kind, "paragraphs": placed, "homes": homes, "next": next })
-    }
-}
-
-/// Each tracked file `catalogs` matches, with its text; every glob must match one.
-fn catalogs(top: &Path, config: &Config, tracked: &[String]) -> Result<Vec<Text>, Vec<Refusal>> {
-    let (mut texts, mut refusals) = (Vec::new(), Vec::new());
-    for glob in &config.catalogs {
-        let files: Vec<&String> = tracked.iter().filter(|f| glob.is_match(f)).collect();
-        if files.is_empty() {
-            let glob = glob.glob().glob();
-            refusals.push(refusal(
-                &format!("`{glob}` in {CONFIG}'s `{CATALOGS}` matches no file git tracks"),
-                &format!("fix `{glob}` to match the repo's string catalogs, or take it out of `{CATALOGS}`"),
-            ));
-        }
-        for file in files {
-            match tracked_text(top, file) {
-                Ok(text) => texts.push(Text {
-                    path: file.clone(),
-                    text,
-                }),
-                Err(r) => refusals.push(r),
-            }
-        }
-    }
-    if refusals.is_empty() {
-        Ok(texts)
-    } else {
-        Err(refusals)
-    }
-}
-
-/// A tracked file's text.
-fn tracked_text(top: &Path, file: &str) -> Result<String, Refusal> {
-    std::fs::read_to_string(top.join(file)).map_err(|e| {
-        refusal(
-            &format!("cannot read `{file}`, which git tracks: {e}"),
-            &format!("restore `{file}` as UTF-8 text, or `git rm` it"),
-        )
-    })
-}
-
-/// `text` written to `path` whole or not at all: a temp file beside it, renamed over it.
-fn write(path: &Path, text: &str) -> Result<(), Vec<Refusal>> {
-    let failed = |e: std::io::Error| {
-        vec![refusal(
-            &format!("cannot write {}: {e}", path.display()),
-            &format!("make {} writable, then run it again", path.display()),
-        )]
-    };
-    let dir = path.parent().expect("a file is in a directory");
-    std::fs::create_dir_all(dir).map_err(failed)?;
-    let mut temp = path.as_os_str().to_owned();
-    temp.push(".tmp");
-    std::fs::write(&temp, text).map_err(failed)?;
-    std::fs::rename(&temp, path).map_err(failed)
 }
 
 /// `names`, each in backticks, comma-separated.
