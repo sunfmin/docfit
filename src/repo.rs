@@ -10,10 +10,36 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 fn git(dir: &Path, args: &[&str]) -> Result<Vec<u8>, Vec<Refusal>> {
-    let out = Command::new("git").arg("-C").arg(dir).args(args).output();
-    match out {
-        Ok(out) if out.status.success() => Ok(out.stdout),
-        Ok(out) => Err(vec![refusal(
+    fed(dir, args, Vec::new(), &[0])
+}
+
+/// `git <args>` in `dir`, given `input` on stdin: its stdout, when it exits
+/// with one of `ok`.
+fn fed(dir: &Path, args: &[&str], input: Vec<u8>, ok: &[i32]) -> Result<Vec<u8>, Vec<Refusal>> {
+    let cannot = |e: std::io::Error| {
+        vec![refusal(
+            &format!("cannot run git: {e}"),
+            "install git, on PATH",
+        )]
+    };
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(cannot)?;
+    let mut stdin = child.stdin.take().expect("stdin is piped");
+    // Written beside the read, so neither pipe fills while the other waits;
+    // a git that stops reading early says so by its exit.
+    let writer = std::thread::spawn(move || stdin.write_all(&input));
+    let out = child.wait_with_output().map_err(cannot)?;
+    let _ = writer.join();
+    match out.status.code() {
+        Some(code) if ok.contains(&code) => Ok(out.stdout),
+        _ => Err(vec![refusal(
             &format!(
                 "`git {}` in {} failed: {}",
                 args.join(" "),
@@ -22,11 +48,15 @@ fn git(dir: &Path, args: &[&str]) -> Result<Vec<u8>, Vec<Refusal>> {
             ),
             "run it in a git repository, or give one with `--repo`",
         )]),
-        Err(e) => Err(vec![refusal(
-            &format!("cannot run git: {e}"),
-            "install git, on PATH",
-        )]),
     }
+}
+
+/// The paths in git's `-z` output.
+fn paths(out: &[u8]) -> Vec<String> {
+    out.split(|b| *b == 0)
+        .filter(|p| !p.is_empty())
+        .map(|p| String::from_utf8_lossy(p).into_owned())
+        .collect()
 }
 
 /// The top of the repo containing `dir`.
@@ -39,12 +69,7 @@ pub(crate) fn top(dir: &Path) -> Result<PathBuf, Vec<Refusal>> {
 
 /// Every path git tracks under `top`, from the top, in git's order.
 pub(crate) fn tracked(top: &Path) -> Result<Vec<String>, Vec<Refusal>> {
-    let out = git(top, &["ls-files", "-z"])?;
-    Ok(out
-        .split(|b| *b == 0)
-        .filter(|p| !p.is_empty())
-        .map(|p| String::from_utf8_lossy(p).into_owned())
-        .collect())
+    Ok(paths(&git(top, &["ls-files", "-z"])?))
 }
 
 /// The last `n` commits of HEAD's first-parent history, newest first, each
@@ -121,59 +146,12 @@ pub(crate) fn at_last_change(
 /// Those of `paths`, each from the top, that git's ignore rules match, with
 /// no regard to whether git tracks them (`git check-ignore --no-index`):
 /// one call for them all.
-pub(crate) fn ignored(top: &Path, paths: &BTreeSet<String>) -> Result<Vec<String>, Vec<Refusal>> {
-    if paths.is_empty() {
+pub(crate) fn ignored(top: &Path, wanted: &BTreeSet<String>) -> Result<Vec<String>, Vec<Refusal>> {
+    if wanted.is_empty() {
         return Ok(Vec::new());
     }
+    let input = wanted.iter().flat_map(|p| p.bytes().chain([0])).collect();
+    // It exits 1 when it matches none of them.
     let args = ["check-ignore", "--no-index", "--stdin", "-z"];
-    let failed = |why: String| {
-        vec![refusal(
-            &format!(
-                "`git {}` in {} failed: {why}",
-                args.join(" "),
-                top.display()
-            ),
-            "run it in a git repository, or give one with `--repo`",
-        )]
-    };
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(top)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            vec![refusal(
-                &format!("cannot run git: {e}"),
-                "install git, on PATH",
-            )]
-        })?;
-    let mut input = Vec::new();
-    for path in paths {
-        input.extend_from_slice(path.as_bytes());
-        input.push(0);
-    }
-    let mut stdin = child.stdin.take().expect("stdin is piped");
-    let writer = std::thread::spawn(move || stdin.write_all(&input));
-    let out = child
-        .wait_with_output()
-        .map_err(|e| failed(e.to_string()))?;
-    writer
-        .join()
-        .expect("the writer does not panic")
-        .map_err(|e| failed(e.to_string()))?;
-    // 1: none of them is ignored.
-    match out.status.code() {
-        Some(0 | 1) => Ok(out
-            .stdout
-            .split(|b| *b == 0)
-            .filter(|p| !p.is_empty())
-            .map(|p| String::from_utf8_lossy(p).into_owned())
-            .collect()),
-        _ => Err(failed(
-            String::from_utf8_lossy(&out.stderr).trim().to_string(),
-        )),
-    }
+    Ok(paths(&fed(top, &args, input, &[0, 1])?))
 }
