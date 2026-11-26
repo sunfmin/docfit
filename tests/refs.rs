@@ -387,3 +387,68 @@ fn ratchet_local_refs_on_a_list_written_other_than_as_its_line_is_refused() {
     let kept = std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap();
     assert_eq!(kept, toml);
 }
+
+#[test]
+fn a_local_issue_refs_that_is_not_a_list_of_names_is_refused() {
+    for bad in [
+        "local_issue_refs = \"rollmind\"",
+        "local_issue_refs = [\"a b\"]",
+        "local_issue_refs = [\"\"]",
+    ] {
+        let toml = format!("{bad}\n{RULE}");
+        let dir = repo(&[("docfit.toml", &toml), ("README.md", "r\n")]);
+        let (code, answer) = check(dir.path());
+        assert_eq!(code, 2, "{bad}: {answer}");
+        let fix = answer["error"][0]["fix"].as_str().unwrap();
+        assert!(
+            fix.contains("local_issue_refs = [\"<name>\", ...]"),
+            "{fix}"
+        );
+    }
+}
+
+#[test]
+fn ratchet_local_refs_deletes_only_the_lists_lines_wherever_it_is() {
+    for (toml, kept) in [
+        (
+            format!("local_issue_refs = [\n  \"mill\",\n]\n{RULE}"),
+            RULE.to_string(),
+        ),
+        (
+            format!(
+                "ignore = [\"x/local_issue_refs/**\"] # local_issue_refs\nlocal_issue_refs = [\"mill\"]\n{RULE}"
+            ),
+            format!("ignore = [\"x/local_issue_refs/**\"] # local_issue_refs\n{RULE}"),
+        ),
+    ] {
+        let dir = repo(&[("docfit.toml", &toml), ("README.md", "r\n")]);
+        let (code, answer) = docfit(dir.path(), &["ratchet", "--local-refs"]);
+        assert_eq!(code, 0, "{answer}");
+        let now = std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap();
+        assert_eq!(now, kept);
+    }
+}
+
+#[test]
+fn on_local_issue_refs_a_baseline_that_can_tighten_says_ratchet_beside_the_upgrade() {
+    let dir = repo(&[
+        (
+            "docfit.toml",
+            &format!("local_issue_refs = [\"mill\"]\n{RULE}"),
+        ),
+        (
+            ".docfit/baseline.json",
+            "{\"src/a.rs\": {\"local_refs\": 2}}\n",
+        ),
+        ("README.md", "r\n"),
+        ("src/a.rs", "// mill#1\n"),
+    ]);
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 0, "{answer}");
+    let next = answer["next"].as_str().unwrap();
+    assert!(
+        next.starts_with("run `docfit ratchet`: a file shrank")
+            && next.contains("docfit ratchet --local-refs"),
+        "{next}"
+    );
+}
