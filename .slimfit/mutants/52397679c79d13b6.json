@@ -1,0 +1,39 @@
+{
+  "tree": "56ae9e86510dae4aea61ed93210a2b2af31cb732+d1fba762150c532c",
+  "picker": "codex:01a2157d-a670-7050-91f6-532521f63fbc:default",
+  "author": "claude-code:a68baca0-5124-56e2-9915-4d52db86da8b:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/survey.rs:60:19: replace match guard e.kind() == std::io::ErrorKind::NotFound with true in baseline",
+        "why": "A baseline path that exists but cannot be read would be treated as absent, while tests for a missing baseline or malformed JSON would still pass.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/survey.rs:33:19: replace match guard e.kind() == std::io::ErrorKind::NotFound with true in config",
+        "why": "An unreadable config would enter the missing-config path, which tests using valid, absent, or syntactically invalid TOML would miss.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/survey.rs:370:53: replace == with != in Seen::place",
+        "why": "Each home would count every paragraph assigned elsewhere, while the individual paragraph placements would stay correct.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/cli.rs:763:27: replace == with != in next",
+        "why": "The must-read total could use another document's byte length or fall back to zero while all debt tasks stay correct.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/cli.rs:529:62: replace != with == in check",
+        "why": "The comparison would invert when check recommends tightening the baseline, which assertions on faults and exit status could miss.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  }
+}
