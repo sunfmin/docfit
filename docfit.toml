@@ -1,6 +1,6 @@
 # docfit's own documents, each under its kind (`docfit check --help`); the gate runs `docfit check` on them.
-# ignore: tests whose fixtures write made-up tracker refs, the ref detector's test data.
-ignore = ["tests/next.rs", "tests/refs.rs", "tests/where.rs"]
+# ignore: the ref detector's test data, which writes made-up tracker refs: the tests whose fixtures do, and each module's unit tests beside it, `src/<module>/tests.rs`.
+ignore = ["tests/next.rs", "tests/refs.rs", "tests/where.rs", "src/**/tests.rs"]
 
 [documents]
 "README.md" = "readme"
