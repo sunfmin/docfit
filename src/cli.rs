@@ -690,21 +690,27 @@ fn measured<'a>(
     tracked: &[String],
 ) -> Result<Vec<Measured<'a>>, Vec<Refusal>> {
     let tree = Tree::new(tracked);
-    let unheld = texts
+    let missing: Vec<_> = texts
         .iter()
-        .flat_map(|(file, _, text)| pointers::unheld(file, text, &tree))
+        .map(|(file, _, text)| pointers::missing(file, text, &tree))
         .collect();
-    let tree = tree.ignoring(repo::ignored(top, &unheld)?);
+    let wanted = missing.iter().flatten().flat_map(|m| m.paths.clone());
+    let ignored: BTreeSet<String> = repo::ignored(top, &wanted.collect())?.into_iter().collect();
     Ok(texts
         .iter()
-        .map(|(file, doc, text)| {
+        .zip(missing)
+        .map(|((file, doc, text), missing)| {
             let (size, at) = Size::of(text);
             Measured {
                 file,
                 budget: doc.budget,
                 size,
                 at,
-                broken: pointers::check(file, text, &tree),
+                broken: missing
+                    .iter()
+                    .filter(|m| !m.paths.iter().any(|p| ignored.contains(p)))
+                    .map(|m| m.fault(file))
+                    .collect(),
             }
         })
         .collect())
