@@ -11,7 +11,62 @@
     }
   },
   "loosened": [],
-  "kept": [],
+  "kept": [
+    {
+      "suite": "rust",
+      "test": "docfit::check::init_registers_each_file_by_its_place_and_holds_the_rest_to_rehome_green_that_day",
+      "hash": "537617a1764bd352",
+      "reason": "none of its assertions (registered, rehome sizes, rehome_grew fix, rehome ratcheted down and dropped) is in the skill test, which asserts only skill registration; the repos conflict (a 5000-byte README held and a SPEC to rehome vs skill dirs)"
+    },
+    {
+      "suite": "rust",
+      "test": "docfit::check::init_ignores_the_markdown_under_source_and_fixture_directories_and_lists_each_glob",
+      "hash": "04374a191ceb5fdb",
+      "reason": "its assertions (the ignored globs and their files, ignore written first in docfit.toml, init idempotent on ignore) are in neither the skill test nor another; the skill test's repo has no source or fixture dirs to ignore"
+    },
+    {
+      "suite": "rust",
+      "test": "docfit::check::a_baseline_holding_a_line_holds_no_paragraph_and_ratchet_writes_it_anew",
+      "hash": "31386ec64e30c082",
+      "reason": "it checks reading an old baseline holding `line` (no paragraph held) and ratchet rewriting it; ratchet_never_raises starts from no baseline, so its setup would change what that test checks"
+    },
+    {
+      "suite": "rust",
+      "test": "docfit::check::a_backticked_path_that_exists_is_green_and_one_that_does_not_red",
+      "hash": "881b86f9a1d5830a",
+      "reason": "it checks backticked paths with no slash or plain files (exist vs gone, not-paths); the slash test checks names whose first segment git does not track; merging the readmes would put two behaviours in one list of faults"
+    },
+    {
+      "suite": "rust",
+      "test": "docfit::check::over_its_budget_with_no_baseline_is_red",
+      "hash": "d828089367dcc438",
+      "reason": "its assertions (fault kinds, sizes 12/10 and 7/5, line 3, the fix's split/where/ratchet hints with no baseline) are on a different document than at_its_budget_exactly, which asserts only the boundary; moving them means rewriting every literal"
+    },
+    {
+      "suite": "rust",
+      "test": "docfit::check::init_writes_ignore_before_a_first_table_on_the_first_line",
+      "hash": "fd271cb320fe8c63",
+      "reason": "it checks ignore written before an existing first table on line 1; the other test starts with no docfit.toml, so init writes the whole file: the setups conflict"
+    },
+    {
+      "suite": "rust",
+      "test": "docfit::check::every_markdown_file_registered_under_a_kind_is_green",
+      "hash": "d7c823f4eabbc28a",
+      "reason": "it checks a green check's documents map for a glob-registered tree; the skill-budget test asserts only the 6144 limit on a SKILL.md, none of these"
+    },
+    {
+      "suite": "rust",
+      "test": "docfit::check::outside_a_git_repository_it_is_refused",
+      "hash": "6aaef14d0bf83006",
+      "reason": "it checks the not-a-git-repository refusal's fix; the refs test runs inside a repo and asserts nothing of it"
+    },
+    {
+      "suite": "rust",
+      "test": "docfit::check::ratchet_never_raises_a_number",
+      "hash": "76d9964b4c6380ef",
+      "reason": "its assertions (ratchet holds, never raises on growth or a new over-budget file, lowers, drops within-budget measures, stays empty) are not in at_its_budget_exactly, whose setup is a different budget at its exact boundary"
+    }
+  ],
   "measured": {
     "rust": {
       "uncovered_lines": 0,
