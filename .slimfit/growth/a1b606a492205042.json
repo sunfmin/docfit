@@ -1,0 +1,10 @@
+{
+  "tree": "3d3560a5d85534021b010af5573e410f4f3aaac0+d1fba762150c532c",
+  "lines": 93,
+  "serves": "docfit#24",
+  "considered": "refs::find's scan reused for both rules (one name_at branch each); ignore_more's key-span lookup extracted as key_lines and reused by without(); budget::ratchet's fresh build reused for --local-refs instead of a second rehold pass",
+  "reviewer": "codex:01a21526-3b5c-7ca0-a748-9e38c43df3ef:default",
+  "author": "claude-code:0b51c950-8f43-5715-afc7-282310761cdb:opus",
+  "cut": "In src/cli.rs, pass `None` as the old baseline only to `refs::ratchet` during migration, so src/refs.rs can delete `rehold` and its second pass. Move `had` instead of cloning it, count and emit the migration task directly from `Rule::Listed`, and use each task kind as its help topic except `over-budget`, which uses `rehome`. In src/documents.rs, return `names` directly from the config validator since an invalid list already causes a refusal.",
+  "answer": "Made every cut: rehold deleted (ratcheted takes refs_held, None under --local-refs); had moved; the drop task emitted from Rule::Listed via an Option; a task's topic is its kind, rehome for over-budget; names returned directly. Net growth went from 113 to 93 lines; the rest is the two rules, the drop command and its refusal, and the drop task."
+}
