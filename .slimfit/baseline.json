@@ -2,8 +2,8 @@
   "suites": {
     "rust": {
       "prod_lines": 3020,
-      "test_lines": 2876,
-      "tests": 113,
+      "test_lines": 2851,
+      "tests": 110,
       "failures": 0,
       "test_seconds": 0.009,
       "covered_lines": 2210,
@@ -59,18 +59,12 @@
       "test": "docfit::check::outside_a_git_repository_it_is_refused",
       "hash": "6aaef14d0bf83006",
       "reason": "it checks the not-a-git-repository refusal's fix; the refs test runs inside a repo and asserts nothing of it"
-    },
-    {
-      "suite": "rust",
-      "test": "docfit::check::ratchet_never_raises_a_number",
-      "hash": "76d9964b4c6380ef",
-      "reason": "its assertions (ratchet holds, never raises on growth or a new over-budget file, lowers, drops within-budget measures, stays empty) are not in at_its_budget_exactly, whose setup is a different budget at its exact boundary"
     }
   ],
   "measured": {
     "rust": {
       "uncovered_lines": 0,
-      "test_seconds": 13.233
+      "test_seconds": 13.344
     }
   }
 }
