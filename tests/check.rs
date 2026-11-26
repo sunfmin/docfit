@@ -612,6 +612,35 @@ fn a_link_to_a_missing_file_is_red_and_a_url_is_not_checked() {
 }
 
 #[test]
+fn a_pointer_git_ignores_is_a_generated_path_and_no_fault() {
+    let dir = repo(&[
+        ("docfit.toml", POINTED),
+        (".gitignore", "/gen/\n/tool/out\n"),
+        (
+            "README.md",
+            "Made: `gen/out.json`, `gen/`, `tool/out`, `tool/out/x.json`, [link](gen/a.md).\n\
+             Typos: `gne/out.json`, `tool/typo`, `src/missing.rs`; a name: `gne/out`.\n",
+        ),
+        ("docs/agents/a.md", "From here `../../gen/b.md`.\n"),
+        ("tool/config.toml", "x = 1\n"),
+        ("src/main.rs", "fn main() {}\n"),
+    ]);
+    let (code, answer) = check(dir.path());
+    let faults: Vec<_> = answer["faults"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| (f["line"].as_u64().unwrap(), f["pointer"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        faults,
+        [(2, "gne/out.json"), (2, "tool/typo"), (2, "src/missing.rs")],
+        "{answer}"
+    );
+    assert_eq!(code, 1);
+}
+
+#[test]
 fn an_adr_named_by_a_number_with_no_file_of_it_is_red() {
     let readme =
         "Per ADR 0001 and ADR-1, ADRs, `ADR 0002`, BADR 0003, ADR 0004x, ADR-.\nBut ADR 0009.\n";
@@ -1118,5 +1147,38 @@ fn init_writes_ignore_before_a_first_table_on_the_first_line() {
     assert_eq!(
         std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap(),
         format!("ignore = [\"src/**\"]\n\n{README_ONLY}")
+    );
+}
+
+#[test]
+fn ratchet_drops_a_held_pointer_once_git_ignores_it() {
+    let readme = "# r\n\nSee `.claude/skills/` and `.claude/gone.md`.\n";
+    let dir = repo(&[
+        ("README.md", readme),
+        (".claude/settings.json", "{}\n"),
+        ("src/main.rs", "fn main() {}\n"),
+    ]);
+    let (code, answer) = docfit(dir.path(), &["init"]);
+    assert_eq!(code, 0, "{answer}");
+    let held =
+        serde_json::json!({ "README.md": { "pointers": [".claude/gone.md", ".claude/skills/"] } });
+    assert_eq!(baseline(dir.path()), held);
+
+    std::fs::write(dir.path().join(".gitignore"), "/.claude/skills/\n").unwrap();
+    git(dir.path(), &["add", ".gitignore"]);
+    let (code, checked) = check(dir.path());
+    assert_eq!(code, 0, "{checked}");
+    assert!(
+        checked["next"]
+            .as_str()
+            .unwrap()
+            .starts_with("run `docfit ratchet`"),
+        "{checked}"
+    );
+    let (_, ratcheted) = docfit(dir.path(), &["ratchet"]);
+    assert_eq!(ratcheted["changed"], true, "{ratcheted}");
+    assert_eq!(
+        baseline(dir.path()),
+        serde_json::json!({ "README.md": { "pointers": [".claude/gone.md"] } })
     );
 }

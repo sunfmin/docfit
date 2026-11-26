@@ -20,32 +20,75 @@ pub(crate) fn extensions() -> String {
     dotted.join(", ")
 }
 
-/// The tree: every path git tracks, and so every directory holding one.
-pub(crate) struct Tree(BTreeSet<String>);
+/// The tree: every path git tracks, and so every directory holding one, and
+/// the paths git ignores among those a document points at.
+pub(crate) struct Tree {
+    tracked: BTreeSet<String>,
+    ignored: BTreeSet<String>,
+}
 
 impl Tree {
     pub(crate) fn new(tracked: &[String]) -> Tree {
-        Tree(tracked.iter().cloned().collect())
+        Tree {
+            tracked: tracked.iter().cloned().collect(),
+            ignored: BTreeSet::new(),
+        }
+    }
+
+    /// The tree, with `ignored` the paths git ignores: a generated path, so
+    /// a pointer to one is no fault.
+    pub(crate) fn ignoring(self, ignored: impl IntoIterator<Item = String>) -> Tree {
+        Tree {
+            ignored: ignored.into_iter().collect(),
+            ..self
+        }
     }
 
     /// Whether a tracked path starts with `prefix`.
     fn under(&self, prefix: &str) -> bool {
-        let first = self.0.range(prefix.to_string()..).next();
+        let first = self.tracked.range(prefix.to_string()..).next();
         first.is_some_and(|p| p.starts_with(prefix))
     }
 
     /// Whether `path`, a file or a directory, is in the tree.
     fn holds(&self, path: &str) -> bool {
         let file = path.trim_end_matches('/');
-        self.0.contains(file) || self.under(&format!("{file}/"))
+        self.tracked.contains(file) || self.under(&format!("{file}/"))
     }
 }
 
-/// The faults of `file`'s `text`: each pointer to what is not in `tree`, in
-/// line order. A fenced code block points at nothing.
+/// A pointer to what the tree does not hold: its line, as written, what it
+/// is missing, and each path it is read as, from the repo's top.
+struct Missing {
+    line: usize,
+    pointer: String,
+    missing: String,
+    paths: Vec<String>,
+}
+
+/// The faults of `file`'s `text`: each pointer to what is not in `tree`, and
+/// is no path it ignores, in line order. A fenced code block points at nothing.
 pub(crate) fn check(file: &str, text: &str, tree: &Tree) -> Vec<Value> {
+    missing(file, text, tree)
+        .into_iter()
+        .filter(|m| !m.paths.iter().any(|p| tree.ignored.contains(p)))
+        .map(|m| fault(file, m.line, &m.pointer, &m.missing))
+        .collect()
+}
+
+/// Each path, from the repo's top, that a pointer of `file`'s `text` to what
+/// is not in `tree` is read as: what to ask git whether it ignores.
+pub(crate) fn unheld(file: &str, text: &str, tree: &Tree) -> Vec<String> {
+    missing(file, text, tree)
+        .into_iter()
+        .flat_map(|m| m.paths)
+        .collect()
+}
+
+/// Each pointer of `file`'s `text` to what is not in `tree`, in line order.
+fn missing(file: &str, text: &str, tree: &Tree) -> Vec<Missing> {
     let dir = file.rsplit_once('/').map_or("", |(d, _)| d);
-    let mut faults = Vec::new();
+    let mut found = Vec::new();
     let mut fenced = false;
     for (n, line) in text.lines().enumerate() {
         let trimmed = line.trim_start();
@@ -56,9 +99,14 @@ pub(crate) fn check(file: &str, text: &str, tree: &Tree) -> Vec<Value> {
         if fenced {
             continue;
         }
-        let mut missing = |pointer: &str, path: String, holds: bool| {
-            if !holds {
-                faults.push(fault(file, n + 1, pointer, &path));
+        let mut missing = |pointer: &str, missing: String, paths: Vec<Option<String>>| {
+            if !paths.iter().flatten().any(|p| tree.holds(p)) {
+                found.push(Missing {
+                    line: n + 1,
+                    pointer: pointer.to_string(),
+                    missing,
+                    paths: paths.into_iter().flatten().collect(),
+                });
             }
         };
         for (i, span) in line.split('`').enumerate() {
@@ -70,32 +118,32 @@ pub(crate) fn check(file: &str, text: &str, tree: &Tree) -> Vec<Value> {
                         continue;
                     }
                     let (top, here) = (resolve("", path), resolve(dir, path));
-                    let holds = [&top, &here]
-                        .iter()
-                        .any(|p| p.as_ref().is_some_and(|p| tree.holds(p)));
-                    missing(span, top.unwrap_or_else(|| path.to_string()), holds);
+                    let named = top.clone().unwrap_or_else(|| path.to_string());
+                    missing(span, named, vec![top, here]);
                 }
                 continue;
             }
             for target in links(span) {
                 let path = resolve(dir, target);
-                let holds = path.as_ref().is_some_and(|p| tree.holds(p));
-                missing(target, path.unwrap_or_else(|| target.to_string()), holds);
+                let named = path.clone().unwrap_or_else(|| target.to_string());
+                missing(target, named, vec![path]);
             }
             for (named, number) in adrs(span) {
                 let prefix = format!("{ADRS}{number:0>4}-");
-                missing(named, format!("{prefix}*"), tree.under(&prefix));
+                if !tree.under(&prefix) {
+                    missing(named, format!("{prefix}*"), Vec::new());
+                }
             }
         }
     }
-    faults
+    found
 }
 
 fn fault(file: &str, line: usize, pointer: &str, missing: &str) -> Value {
     json!({
         "file": file, "fault": "broken_pointer", "line": line, "pointer": pointer, "missing": missing,
         "fix": format!(
-            "line {line} of `{file}` points at `{missing}`, which git does not track: point it at what is there now, or delete it; a name that is not a repo path goes without backticks"
+            "line {line} of `{file}` points at `{missing}`, which git neither tracks nor ignores: point it at what is there now, or delete it; a name that is not a repo path goes without backticks"
         ),
     })
 }
