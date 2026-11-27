@@ -1,12 +1,114 @@
-//! Decides `docfit next`: the debt the baseline holds, as tasks. A file held
+//! Decides `docfit next`: the debt the baseline holds, as tasks, each with
+//! its kind, the help topic whose steps pay it, and its accept. A file held
 //! to rehome that is still registered under no kind is a `rehome` task; a
 //! document held over its budget that is still over it is an `over-budget`
 //! task. A file held at a count of local refs, restatements or measurements
-//! that still holds one is a task too, decided where its count is. Pure: the
-//! files measured and the baseline arrive as arguments.
+//! that still holds one is a task too, its debt decided where its count is;
+//! a hot document is one, which no baseline holds; and a `docfit.toml` that
+//! still lists `local_issue_refs` is one. Pure: the files judged, the
+//! baseline and the history arrive as arguments.
 
-use crate::budget::{Baseline, Held, Measured, Rehome, Size, Stray};
-use serde_json::{Value, json};
+use crate::budget::{BASELINE, Baseline, Held, Measured, Rehome, Size, Stray};
+use crate::cli::EXIT_OK;
+use crate::documents::CONFIG;
+use crate::hot::{self, Commit, Hot};
+use crate::survey::Judged;
+use crate::{measurements, refs, restates};
+use serde_json::{Map, Value, json};
+
+/// The topic whose steps pay a `rehome` or an `over-budget` task.
+pub(crate) const REHOME: &str = "rehome";
+
+/// The kind of `docfit next`'s task to drop `local_issue_refs`.
+pub(crate) const DROP: &str = "drop-local-issue-refs";
+
+/// One task of `docfit next`: its kind, the topic of `docfit help` whose
+/// steps pay it, its debt, and when it is done.
+pub(crate) struct Task<'a> {
+    pub(crate) kind: &'static str,
+    pub(crate) topic: &'static str,
+    pub(crate) debt: Debt<'a>,
+    pub(crate) accept: String,
+}
+
+/// Every task of `judged`'s debt, in the order `docfit next` answers them,
+/// and each kind's count of them.
+pub(crate) fn list<'a>(
+    judged: &Judged<'a>,
+    held: &Baseline,
+    rule: &'a refs::Rule,
+    history: &[Commit],
+    hot: Hot,
+) -> (Vec<Task<'a>>, Map<String, Value>) {
+    let (docs, counted) = (&judged.docs, &judged.counted);
+    let [rehome, over_budget] = debt(docs, &judged.strays, held);
+    // Each kind: its name, the topic of its steps, what the baseline holds
+    // its file at until it is done (none: the hot file, which no baseline
+    // holds, is done within its budget), and its debt.
+    let debts = [
+        ("rehome", REHOME, Some("to rehome"), rehome),
+        ("over-budget", REHOME, Some("over its budget"), over_budget),
+        (
+            "local-refs",
+            "local-refs",
+            Some("at a count of local refs"),
+            refs::debt(counted.refs, held),
+        ),
+        (
+            "restates",
+            "restates",
+            Some("at a count of restatements"),
+            restates::debt(&counted.restated, held),
+        ),
+        (
+            "measurement",
+            "measurement",
+            Some("at a count of measurements"),
+            measurements::debt(&counted.measured, held),
+        ),
+        ("hot-file", "hot-file", None, hot::debt(docs, history, hot)),
+    ];
+    let (mut tasks, mut counts) = (Vec::new(), Map::new());
+    let listed = match rule {
+        refs::Rule::Listed(names) => Some(names),
+        refs::Rule::Unlisted(_) => None,
+    };
+    counts.insert(DROP.to_string(), json!(usize::from(listed.is_some())));
+    if let Some(names) = listed {
+        tasks.push(Task {
+            kind: DROP,
+            topic: DROP,
+            debt: Debt {
+                file: CONFIG,
+                summary: format!("{CONFIG} still lists `{}`, docfit 0.1.3's: a ref to a name it does not list, such as a checkout added or gone since, goes uncounted; drop it for the rule, which needs no list", refs::KEY),
+                evidence: json!({ refs::KEY: names }),
+            },
+            accept: format!("{CONFIG} has no `{}`, and `docfit check` exits {EXIT_OK}", refs::KEY),
+        });
+    }
+    for (kind, topic, holds, debts) in debts {
+        counts.insert(kind.to_string(), json!(debts.len()));
+        for debt in debts {
+            let accept = match holds {
+                Some(holds) => format!(
+                    "`docfit ratchet`, then `docfit check` exits {EXIT_OK} and {BASELINE} no longer holds `{}` {holds}",
+                    debt.file
+                ),
+                None => format!(
+                    "`{}` is within its kind's budget (`evidence.budget`), and `docfit check` exits {EXIT_OK}",
+                    debt.file
+                ),
+            };
+            tasks.push(Task {
+                kind,
+                topic,
+                debt,
+                accept,
+            });
+        }
+    }
+    (tasks, counts)
+}
 
 /// One file of debt: its path, a line saying what it is, and what was
 /// measured of it (without what `docfit where` sees in it).

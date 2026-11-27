@@ -5,7 +5,6 @@ use crate::budget::{BASELINE, Baseline};
 use crate::documents::{self, CONFIG, Refusal};
 use crate::hot;
 use crate::kind::Kind;
-use crate::measurements;
 use crate::paragraph::{self, Home};
 use crate::pointers;
 use crate::refs;
@@ -467,7 +466,7 @@ pub(crate) fn help() -> Help {
         .constant("IGNORED", quoted(&documents::IGNORED))
         .constant("LOCAL_REFS", refs::KEY)
         .constant("NOT_REFS", refs::NOT)
-        .constant("DROP", DROP)
+        .constant("DROP", tasks::DROP)
         .constant("HOT", hot::shown())
         .constant("HOT_SHOWN", hot::SHOWN)
         .constant("MUST_READ", MUST_READ)
@@ -674,7 +673,6 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
     let seen = Seen::at(&top)?;
     let survey = &seen.survey;
     let judged = survey.judged(&top)?;
-    let (docs, counted) = (&judged.docs, &judged.counted);
     let (held, mut notes) = match baseline(&top)? {
         Some(held) => (held, Vec::<String>::new()),
         None => (
@@ -684,77 +682,26 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
             )],
         ),
     };
-    let hot = survey.config.hot;
-    let [rehome, over_budget] = tasks::debt(docs, &judged.strays, &held);
-    let history = repo::history(&top, hot.window)?;
-    // Each kind in the order `docfit next` answers it: its name, its steps,
-    // what the baseline holds its file at until it is done (none: the hot
-    // file, which no baseline holds, is done within its budget), and its
-    // debt. The rehome steps start from `docfit where`, so its answer is
-    // evidence.
-    let refs = counted.refs;
-    let debt = [
-        ("rehome", Some("to rehome"), rehome),
-        ("over-budget", Some("over its budget"), over_budget),
-        (
-            "local-refs",
-            Some("at a count of local refs"),
-            refs::debt(refs, &held),
-        ),
-        (
-            "restates",
-            Some("at a count of restatements"),
-            restates::debt(&counted.restated, &held),
-        ),
-        (
-            "measurement",
-            Some("at a count of measurements"),
-            measurements::debt(&counted.measured, &held),
-        ),
-        ("hot-file", None, hot::debt(docs, &history, hot)),
-    ];
-    let (mut tasks, mut counts) = (Vec::new(), serde_json::Map::new());
-    let listed = match &survey.config.refs {
-        refs::Rule::Listed(names) => Some(names),
-        refs::Rule::Unlisted(_) => None,
-    };
-    counts.insert(DROP.to_string(), json!(usize::from(listed.is_some())));
-    if let Some(names) = listed {
-        tasks.push(json!({
-            "kind": DROP,
-            "summary": format!("{CONFIG} still lists `{}`, docfit 0.1.3's: a ref to a name it does not list, such as a checkout added or gone since, goes uncounted; drop it for the rule, which needs no list", refs::KEY),
-            "files": [CONFIG],
-            "steps": steps(DROP),
-            "accept": format!("{CONFIG} has no `{}`, and `docfit check` exits {EXIT_OK}", refs::KEY),
-            "evidence": { refs::KEY: names },
-        }));
-    }
-    for (kind, holds, debts) in debt {
-        // A task's steps are `docfit help <kind>`, an over-budget's `rehome`'s.
-        let topic = if kind == "over-budget" { REHOME } else { kind };
-        counts.insert(kind.to_string(), json!(debts.len()));
-        for debt in debts {
-            let mut evidence = debt.evidence;
-            if topic == REHOME {
-                let text = tracked_text(&top, debt.file).map_err(|r| vec![r])?;
-                evidence["where"] = seen.place(debt.file, &text);
-            }
-            tasks.push(json!({
-                "kind": kind, "summary": debt.summary, "files": [debt.file],
-                "steps": steps(topic),
-                "accept": match holds {
-                    Some(holds) => format!(
-                        "`docfit ratchet`, then `docfit check` exits {EXIT_OK} and {BASELINE} no longer holds `{}` {holds}",
-                        debt.file
-                    ),
-                    None => format!(
-                        "`{}` is within its kind's budget (`evidence.budget`), and `docfit check` exits {EXIT_OK}",
-                        debt.file
-                    ),
-                },
-                "evidence": evidence,
-            }));
+    let history = repo::history(&top, survey.config.hot.window)?;
+    let (listed, mut counts) = tasks::list(
+        &judged,
+        &held,
+        &survey.config.refs,
+        &history,
+        survey.config.hot,
+    );
+    let mut tasks = Vec::new();
+    for task in listed {
+        // A rehome's steps start from `docfit where`: its answer is evidence.
+        let (file, mut evidence) = (task.debt.file, task.debt.evidence);
+        if task.topic == tasks::REHOME {
+            let text = tracked_text(&top, file).map_err(|r| vec![r])?;
+            evidence["where"] = seen.place(file, &text);
         }
+        tasks.push(json!({
+            "kind": task.kind, "summary": task.debt.summary, "files": [file],
+            "steps": steps(task.topic), "accept": task.accept, "evidence": evidence,
+        }));
     }
     let must_read = survey.answer.must_read(|f| {
         judged
@@ -785,9 +732,6 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
     Ok((pretty(&answer), EXIT_OK))
 }
 
-/// The topic whose steps pay a `rehome` or an `over-budget` task.
-const REHOME: &str = "rehome";
-
 /// The steps of a `docfit next` task: what `docfit help <topic>` prints,
 /// without its title.
 fn steps(topic: &str) -> String {
@@ -795,9 +739,6 @@ fn steps(topic: &str) -> String {
     let (_, body) = text.split_once('\n').expect("a title, then the text");
     body.trim().to_string()
 }
-
-/// The kind of `docfit next`'s task to drop `local_issue_refs`.
-const DROP: &str = "drop-local-issue-refs";
 
 /// The count of the agent documents' bytes in `docfit next`'s `counts`.
 const MUST_READ: &str = "must_read_bytes";

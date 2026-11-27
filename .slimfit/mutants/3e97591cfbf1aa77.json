@@ -1,0 +1,16 @@
+{
+  "tree": "e2af7cbe0863622c3c5167a2b8b0c2e010051d0e+d1fba762150c532c",
+  "picker": "codex:01a21a99-a8aa-7672-80d5-f0ee066d59aa:default",
+  "author": "claude-code:45a0843a-e04d-59a4-8420-6e1293bdb817:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/cli.rs:697:23: replace == with != in next",
+        "why": "Tests that check task kinds, counts, or steps could miss that rehome and over-budget tasks lose their where evidence while other tasks attempt to attach it.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  },
+  "added_lines": 106
+}
