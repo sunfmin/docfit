@@ -1,0 +1,45 @@
+{
+  "tip": "a33e4f303d0d78f6a891eebcb71efaf787460ccf",
+  "from": "db2f4bd2e92da7d925b5c54cd929d0c3fb51810f",
+  "pool": 99,
+  "drawn": {
+    "rust": [
+      {
+        "name": "src/survey.rs:106:9: replace Survey::judged -> Result<Judged<'_>, Vec<Refusal>> with Ok(Default::default())",
+        "outcome": "unviable"
+      },
+      {
+        "name": "src/survey.rs:332:9: replace Seen::at -> Result<Seen, Vec<Refusal>> with Ok(Default::default())",
+        "outcome": "unviable"
+      },
+      {
+        "name": "src/pointers.rs:64:5: replace missing -> Vec<Missing> with vec![Default::default()]",
+        "outcome": "unviable"
+      },
+      {
+        "name": "src/repo.rs:150:5: replace ignored -> Result<Vec<String>, Vec<Refusal>> with Ok(vec![String::new()])",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/survey.rs:266:5: replace measured -> Result<Vec<Measured<'a>>, Vec<Refusal>> with Ok(vec![])",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/survey.rs:285:33: delete ! in measured",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/survey.rs:300:32: replace == with != in strays",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/survey.rs:296:5: replace strays -> Result<Vec<Stray<'a>>, Vec<Refusal>> with Ok(vec![Default::default()])",
+        "outcome": "unviable"
+      },
+      {
+        "name": "src/cli.rs:673:5: replace next -> Result<(String, i32), Vec<Refusal>> with Ok((String::new(), -1))",
+        "outcome": "killed"
+      }
+    ]
+  }
+}
