@@ -409,7 +409,7 @@ struct RehomeTopic;
 
 /// What a local tracker ref is, and how to take a file's refs out, and so pay a `local-refs` task of `docfit next`.
 ///
-/// A local ref is `<name>#<digits>` (`guild#66`) that a later reader cannot follow: it names no owner, so it is one host's tracker, whichever. It needs no list of trackers. `<name>` is `[a-z][a-z0-9_-]*`, not after a letter, a digit, `/` (an owner's: `sunfmin/lore#25` is no local ref, and a public issue is always written so, or as its URL), `.` (`a.md#3`), `:` or `{` (`{closure#0}`); the digits are not run on by a letter, a digit or `_`; and it is not in a URL (a word with `://`). A name that is no tracker in the repo is listed in `{const:CONFIG}`, before its first table, as `{const:NOT_REFS} = ["shim"]`; test data that writes refs is `ignore`d by glob. A `{const:CONFIG}` that still has `{const:LOCAL_REFS}` counts as docfit 0.1.3 did instead (`docfit help {const:DROP}`).
+/// A local ref is `<name>#<digits>` that a later reader cannot follow: it names no owner, so it is one host's tracker, whichever. It needs no list of trackers. `<name>` is `[a-z][a-z0-9_-]*`, not after a letter, a digit, `/` (an owner's: `sunfmin/lore#25` is no local ref, and a public issue is always written so, or as its URL), `.` (`a.md#3`), `:` or `{` (`{closure#0}`); the digits are not run on by a letter, a digit or `_`; and it is not in a URL (a word with `://`). A name that is no tracker in the repo is listed in `{const:CONFIG}`, before its first table, as `{const:NOT_REFS} = ["shim"]`; test data that writes refs is `ignore`d by glob. A `{const:CONFIG}` that still has `{const:LOCAL_REFS}` counts as docfit 0.1.3 did instead (`docfit help {const:DROP}`).
 ///
 /// 1. For each ref in the task's `evidence` (`refs`, each with its `line`), read the issue it names: `factorium issue show <ref>`.
 /// 2. Replace the ref with what the reader needed from it: the person's words, with who, date and where; or the command and the number it printed. Or delete the ref, if what is around it reads alone without it.
@@ -421,7 +421,7 @@ struct LocalRefsTopic;
 /// How to drop `{const:LOCAL_REFS}`, docfit 0.1.3's list of names, for the rule that needs none (`docfit help local-refs`), and so pay a `{const:DROP}` task of `docfit next`. While the list is there, a ref is counted only with a name it lists: one to a checkout added or gone since goes uncounted.
 ///
 /// 1. Run `docfit ratchet --local-refs`: it deletes `{const:LOCAL_REFS}` from `{const:CONFIG}`, with the comment lines just above it that name it, and holds each file's refs at their count now by the rule, up or down. It does this once: on a `{const:CONFIG}` without the field it refuses.
-/// 2. Read `git diff {const:BASELINE}`. A file it now holds that is test data (a fixture's made-up `proj#7`): add its glob to `ignore`. A name that is no tracker in the repo: add it to `{const:NOT_REFS}`. Then run `docfit ratchet`, which lowers each count.
+/// 2. Read `git diff {const:BASELINE}`. A file it now holds that is test data (a fixture's made-up ref): add its glob to `ignore`. A name that is no tracker in the repo: add it to `{const:NOT_REFS}`. Then run `docfit ratchet`, which lowers each count.
 /// 3. Run `docfit check`, and commit `{const:CONFIG}` and the baseline together: the task is done once `{const:CONFIG}` has no `{const:LOCAL_REFS}` and `docfit check` exits {const:EXIT_OK}.
 #[derive(Topic)]
 #[topic(name = "drop-local-issue-refs")]
