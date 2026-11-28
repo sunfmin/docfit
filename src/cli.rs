@@ -10,7 +10,7 @@ use crate::pointers;
 use crate::refs;
 use crate::repo;
 use crate::restates;
-use crate::survey::{Seen, Survey, baseline, config, tracked_text, write, written};
+use crate::survey::{Seen, Survey, baseline, config, must_read_then, tracked_text, write, written};
 use crate::tasks;
 use agent_help::{Help, Topic};
 use clap::{FromArgMatches, Parser, Subcommand};
@@ -703,13 +703,7 @@ fn next(repo: Option<PathBuf>, all: bool) -> Result<(String, i32), Vec<Refusal>>
             "steps": steps(task.topic), "accept": task.accept, "evidence": evidence,
         }));
     }
-    let must_read = survey.answer.must_read(|f| {
-        judged
-            .texts
-            .iter()
-            .find(|t| t.0 == f)
-            .map_or(0, |t| t.2.len())
-    });
+    let must_read = judged.must_read();
     counts.insert(MUST_READ.to_string(), json!(must_read));
     notes.push(match must_read_then(&top) {
         Some((commit, then)) => format!("{MUST_READ} {must_read}, was {then} at {commit}, the commit {BASELINE} was last written in"),
@@ -742,15 +736,6 @@ fn steps(topic: &str) -> String {
 
 /// The count of the agent documents' bytes in `docfit next`'s `counts`.
 const MUST_READ: &str = "must_read_bytes";
-
-/// The commit {BASELINE} was last written in, and the agent documents' bytes
-/// its {CONFIG} registers at it.
-fn must_read_then(top: &Path) -> Option<(String, usize)> {
-    let (commit, config, sizes) = repo::at_last_change(top, BASELINE, CONFIG)?;
-    let paths: Vec<String> = sizes.keys().cloned().collect();
-    let answer = documents::check(&documents::config(&config).ok()?, &paths);
-    Some((commit, answer.must_read(|f| sizes[f])))
-}
 
 fn place(file: &Path) -> Result<(String, i32), Vec<Refusal>> {
     let unreadable = |e: std::io::Error| {
