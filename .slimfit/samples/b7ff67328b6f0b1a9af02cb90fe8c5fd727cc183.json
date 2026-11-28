@@ -1,0 +1,37 @@
+{
+  "tip": "b7ff67328b6f0b1a9af02cb90fe8c5fd727cc183",
+  "from": "a33e4f303d0d78f6a891eebcb71efaf787460ccf",
+  "pool": 9,
+  "drawn": {
+    "rust": [
+      {
+        "name": "src/cli.rs:672:5: replace next -> Result<(String, i32), Vec<Refusal>> with Ok((\"xyzzy\".into(), 0))",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/tasks.rs:43:5: replace list -> (Vec<Task<'a>>, Map<String, Value>) with (vec![], Default::default())",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/cli.rs:672:5: replace next -> Result<(String, i32), Vec<Refusal>> with Ok((\"xyzzy\".into(), -1))",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/cli.rs:455:5: replace help -> Help with Default::default()",
+        "outcome": "unviable"
+      },
+      {
+        "name": "src/cli.rs:672:5: replace next -> Result<(String, i32), Vec<Refusal>> with Ok((String::new(), 1))",
+        "outcome": "killed"
+      },
+      {
+        "name": "src/tasks.rs:43:5: replace list -> (Vec<Task<'a>>, Map<String, Value>) with (vec![Default::default()], Default::default())",
+        "outcome": "unviable"
+      },
+      {
+        "name": "src/cli.rs:672:5: replace next -> Result<(String, i32), Vec<Refusal>> with Ok((\"xyzzy\".into(), 1))",
+        "outcome": "killed"
+      }
+    ]
+  }
+}
