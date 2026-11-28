@@ -2,8 +2,8 @@
   "suites": {
     "rust": {
       "prod_lines": 3134,
-      "test_lines": 2924,
-      "tests": 113,
+      "test_lines": 2869,
+      "tests": 108,
       "failures": 0,
       "test_seconds": 0.009,
       "covered_lines": 2279,
@@ -83,12 +83,24 @@
       "test": "docfit::check::outside_a_git_repository_it_is_refused",
       "hash": "6aaef14d0bf83006",
       "reason": "it checks the not-a-git-repository refusal's fix; the refs test runs inside a repo and asserts nothing of it"
+    },
+    {
+      "suite": "rust",
+      "test": "docfit::refs::init_on_a_baseline_holding_no_refs_adopts_them_and_once_held_leaves_them",
+      "hash": "b552d1b46cd4e500",
+      "reason": "Its other_test checks init's strings hold in tests/restates.rs on a README fixture; this one checks init adopts local_refs beside a bytes hold and that a second init leaves the held refs and reports a new one as a fault: no assertion maps, and the fixtures (repo docs vs restates fixture) conflict."
+    },
+    {
+      "suite": "rust",
+      "test": "docfit::refs::init_without_a_config_writes_no_list_and_holds_each_files_refs_by_the_rule",
+      "hash": "9bbf3aca3fa2cf24",
+      "reason": "Its other_test runs init with a docfit.toml listing local_issue_refs; this one runs init with no config, asserting no list is written and that the rule counts guild#66 and kiln#1 but not sunfmin/kiln#2: the setups conflict (config present vs absent), so folding one changes what the other checks."
     }
   ],
   "measured": {
     "rust": {
       "uncovered_lines": 0,
-      "test_seconds": 13.073
+      "test_seconds": 12.372
     }
   }
 }

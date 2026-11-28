@@ -1,0 +1,33 @@
+{
+  "tree": "80eae942796e4aac5574bf6311fbf61998c46292+d1fba762150c532c",
+  "picker": "codex:01a22097-363a-7050-92fb-eb84935416ea:default",
+  "author": "claude-code:84e09dfd-4fc6-51a4-8e5d-907fb0a4095c:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/cli.rs:538:17: replace match guard tighter with true in check",
+        "why": "The merged test checks that shrink advice appears after a count drops, so it may miss the same advice appearing when a legacy-list baseline is already tight.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/refs.rs:88:85: replace || with && in find",
+        "why": "The merged scanner fixture checks several excluded forms but leaves letter and underscore suffixes after an issue number untested.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  },
+  "removed_tests": {
+    "rust": [
+      "tests/refs.rs:65: the_fits_records_and_what_ignore_matches_are_not_read",
+      "tests/refs.rs:175: by_the_rule_a_ref_to_any_tracker_in_a_comment_is_red_with_no_list",
+      "tests/refs.rs:209: by_the_rule_an_owner_a_url_a_symbol_a_path_or_a_capital_is_no_ref",
+      "tests/refs.rs:222: a_name_in_not_issue_refs_is_no_ref",
+      "tests/refs.rs:354: a_binary_file_is_not_read",
+      "tests/refs.rs:365: a_tracked_file_gone_from_the_working_tree_is_not_read",
+      "tests/refs.rs:433: on_local_issue_refs_a_baseline_that_can_tighten_says_ratchet_beside_the_upgrade"
+    ]
+  },
+  "added_lines": 0
+}

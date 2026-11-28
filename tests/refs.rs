@@ -62,7 +62,7 @@ fn a_ref_with_an_owner_or_in_a_url_is_no_ref() {
 }
 
 #[test]
-fn the_fits_records_and_what_ignore_matches_are_not_read() {
+fn the_fits_records_what_ignore_matches_a_binary_file_and_a_tracked_file_gone_are_not_read() {
     let toml = format!("ignore = [\"vendor/**\"]\n{ON}");
     let dir = repo(&[
         ("docfit.toml", &toml),
@@ -71,9 +71,12 @@ fn the_fits_records_and_what_ignore_matches_are_not_read() {
         (".slimfit/growth/x.json", "{\"serves\": \"rollmind#84\"}\n"),
         (".truefit/x.json", "{\"serves\": \"rollmind#84\"}\n"),
         ("vendor/a.c", "// rollmind#1\n"),
+        ("a.bin", "\0rollmind#1\n"),
+        ("src/gone.rs", "// rollmind#1\n"),
     ]);
+    std::fs::remove_file(dir.path().join("src/gone.rs")).unwrap();
     let (code, answer) = check(dir.path());
-    assert_eq!(code, 0, "{answer}");
+    assert_eq!(code, 0, "the fault names the file that was read: {answer}");
 }
 
 #[test]
@@ -90,9 +93,11 @@ fn a_file_held_at_4_and_cut_to_3_is_green_and_ratchet_lowers_it_then_drops_it_at
     ]);
     let (code, answer) = check(dir.path());
     assert_eq!(code, 0, "{answer}");
+    let next = answer["next"].as_str().unwrap();
     assert!(
-        answer["next"].as_str().unwrap().contains("docfit ratchet"),
-        "{answer}"
+        next.starts_with("run `docfit ratchet`: a file shrank")
+            && next.contains("docfit ratchet --local-refs"),
+        "on local_issue_refs, a baseline that can tighten says ratchet beside the upgrade: {next}"
     );
     let (code, answer) = docfit(dir.path(), &["ratchet"]);
     assert_eq!(code, 0, "{answer}");
@@ -172,13 +177,23 @@ fn init_on_a_baseline_holding_no_refs_adopts_them_and_once_held_leaves_them() {
 const RULE: &str = "[documents]\n\"README.md\" = \"readme\"\n";
 
 #[test]
-fn by_the_rule_a_ref_to_any_tracker_in_a_comment_is_red_with_no_list() {
+fn by_the_rule_a_ref_in_a_comment_is_red_with_no_list_and_an_owner_a_url_a_symbol_a_path_a_capital_or_a_not_issue_ref_is_none()
+ {
+    let toml = format!("not_issue_refs = [\"shim\"]\n{RULE}");
+    let none = "sunfmin/kiln#25 https://x/issues/3 {closure#0} a.md#3 C#1\n// shim#2 is a symbol\n";
     let dir = repo(&[
-        ("docfit.toml", RULE),
+        ("docfit.toml", &toml),
         (".docfit/baseline.json", "{}\n"),
         ("README.md", "r\n"),
-        ("src/a.rs", "fn a() {}\n// as guild#66 asked\n"),
+        ("src/a.rs", none),
     ]);
+    let (code, answer) = check(dir.path());
+    assert_eq!(code, 0, "{answer}");
+    std::fs::write(
+        dir.path().join("src/a.rs"),
+        "fn a() {}\n// shim#2, as guild#66 asked\n",
+    )
+    .unwrap();
     let (code, answer) = check(dir.path());
     assert_eq!(code, 1, "{answer}");
     let fault = &answer["faults"][0];
@@ -203,34 +218,6 @@ fn by_the_rule_a_ref_to_any_tracker_in_a_comment_is_red_with_no_list() {
             .contains("docfit help local-refs"),
         "{fault}"
     );
-}
-
-#[test]
-fn by_the_rule_an_owner_a_url_a_symbol_a_path_or_a_capital_is_no_ref() {
-    let text = "sunfmin/kiln#25 https://x/issues/3 {closure#0} a.md#3 C#1\n";
-    let dir = repo(&[
-        ("docfit.toml", RULE),
-        (".docfit/baseline.json", "{}\n"),
-        ("README.md", "r\n"),
-        ("src/a.rs", text),
-    ]);
-    let (code, answer) = check(dir.path());
-    assert_eq!(code, 0, "{answer}");
-}
-
-#[test]
-fn a_name_in_not_issue_refs_is_no_ref() {
-    let toml = format!("not_issue_refs = [\"shim\"]\n{RULE}");
-    let dir = repo(&[
-        ("docfit.toml", &toml),
-        (".docfit/baseline.json", "{}\n"),
-        ("README.md", "r\n"),
-        ("src/a.rs", "// shim#2 is a symbol\n"),
-    ]);
-    assert_eq!(check(dir.path()).0, 0);
-    std::fs::write(dir.path().join("src/a.rs"), "// shim#2, kiln#3\n").unwrap();
-    let (code, answer) = check(dir.path());
-    assert_eq!((code, &answer["faults"][0]["ref"]), (1, &json!("kiln#3")));
 }
 
 #[test]
@@ -351,29 +338,6 @@ fn the_drop_tasks_steps_delete_the_list_hold_the_rules_counts_once_and_stay_gree
 }
 
 #[test]
-fn a_binary_file_is_not_read() {
-    let dir = repo(&[
-        ("docfit.toml", ON),
-        (".docfit/baseline.json", "{}\n"),
-        ("README.md", "r\n"),
-        ("a.bin", "\0rollmind#1\n"),
-    ]);
-    assert_eq!(check(dir.path()).0, 0);
-}
-
-#[test]
-fn a_tracked_file_gone_from_the_working_tree_is_not_read() {
-    let dir = repo(&[
-        ("docfit.toml", ON),
-        (".docfit/baseline.json", "{}\n"),
-        ("README.md", "r\n"),
-        ("src/gone.rs", "// rollmind#1\n"),
-    ]);
-    std::fs::remove_file(dir.path().join("src/gone.rs")).unwrap();
-    assert_eq!(check(dir.path()).0, 0);
-}
-
-#[test]
 fn ratchet_local_refs_on_a_list_written_other_than_as_its_line_is_refused() {
     let toml = format!("\"local_issue_refs\" = [\"mill\"]\n{RULE}");
     let dir = repo(&[("docfit.toml", &toml), ("README.md", "r\n")]);
@@ -427,28 +391,4 @@ fn ratchet_local_refs_deletes_only_the_lists_lines_wherever_it_is() {
         let now = std::fs::read_to_string(dir.path().join("docfit.toml")).unwrap();
         assert_eq!(now, kept);
     }
-}
-
-#[test]
-fn on_local_issue_refs_a_baseline_that_can_tighten_says_ratchet_beside_the_upgrade() {
-    let dir = repo(&[
-        (
-            "docfit.toml",
-            &format!("local_issue_refs = [\"mill\"]\n{RULE}"),
-        ),
-        (
-            ".docfit/baseline.json",
-            "{\"src/a.rs\": {\"local_refs\": 2}}\n",
-        ),
-        ("README.md", "r\n"),
-        ("src/a.rs", "// mill#1\n"),
-    ]);
-    let (code, answer) = check(dir.path());
-    assert_eq!(code, 0, "{answer}");
-    let next = answer["next"].as_str().unwrap();
-    assert!(
-        next.starts_with("run `docfit ratchet`: a file shrank")
-            && next.contains("docfit ratchet --local-refs"),
-        "{next}"
-    );
 }
