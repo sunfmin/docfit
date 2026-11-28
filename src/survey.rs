@@ -151,13 +151,24 @@ pub(crate) struct Counted<'a> {
 /// each stray, and the counts.
 pub(crate) struct Judged<'a> {
     answer: &'a Answer,
-    pub(crate) texts: Vec<(&'a str, Document, String)>,
+    texts: Vec<(&'a str, Document, String)>,
     pub(crate) docs: Vec<Measured<'a>>,
     pub(crate) strays: Vec<Stray<'a>>,
     pub(crate) counted: Counted<'a>,
 }
 
 impl Judged<'_> {
+    /// The bytes an agent must read before any work: the agent documents'
+    /// total, as read now.
+    pub(crate) fn must_read(&self) -> usize {
+        self.answer.must_read(|f| {
+            self.texts
+                .iter()
+                .find(|(file, ..)| *file == f)
+                .map_or(0, |(.., text)| text.len())
+        })
+    }
+
     /// Every fault, in path order: the survey's that are not a stray's, the
     /// budgets' against `baseline`, and the counts'.
     pub(crate) fn faults(&self, baseline: Option<&Baseline>) -> Vec<Value> {
@@ -207,6 +218,16 @@ impl Judged<'_> {
         measurements::adopt(&counted.measured, &mut next);
         next
     }
+}
+
+/// The commit that last wrote the baseline beside a `docfit.toml`, and the
+/// bytes an agent had to read at it ([`Judged::must_read`] then); none before
+/// such a commit, or when that `docfit.toml` does not parse.
+pub(crate) fn must_read_then(top: &Path) -> Option<(String, usize)> {
+    let (commit, config, sizes) = repo::at_last_change(top, BASELINE, CONFIG)?;
+    let paths: Vec<String> = sizes.keys().cloned().collect();
+    let answer = documents::check(&documents::config(&config).ok()?, &paths);
+    Some((commit, answer.must_read(|f| sizes[f])))
 }
 
 /// The text of each of `files` at `top`: one that is a symbolic link, that
