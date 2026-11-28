@@ -1,0 +1,22 @@
+{
+  "tree": "46218e0f10a15c57daed152f8f4955a6305b716e+d1fba762150c532c",
+  "picker": "codex:01a22097-7e08-7733-bb83-c75477b93659:default",
+  "author": "claude-code:d4c7302b-518a-59c9-ad7f-0547b40d24d5:opus",
+  "picks": {
+    "rust": [
+      {
+        "name": "src/survey.rs:167:42: replace == with != in Judged<'_>::must_read",
+        "why": "Tests that check the total using equally sized documents may miss that the lookup selects a different file.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      },
+      {
+        "name": "src/survey.rs:227:5: replace must_read_then -> Option<(String, usize)> with None",
+        "why": "Tests that assert the current byte count may miss that the comparison with a committed baseline disappears.",
+        "outcome": "killed",
+        "first_outcome": "killed"
+      }
+    ]
+  },
+  "added_lines": 17
+}
